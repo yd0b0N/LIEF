@@ -67,7 +67,8 @@ Parser::Parser(const std::string& file, DYNSYM_COUNT_METHODS count_mtd) :
   LIEF::Parser{file},
   binary_{nullptr},
   type_{ELF_CLASS::ELFCLASSNONE},
-  count_mtd_{count_mtd}
+  count_mtd_{count_mtd},
+  need_endian_swap{false}
 {
   this->stream_ = std::unique_ptr<VectorStream>(new VectorStream{file});
   this->init(filesystem::path(file).filename());
@@ -143,7 +144,13 @@ void Parser::parse_symbol_version(uint64_t symbol_version_offset) {
       this->stream_->read(symbol_version_offset, nb_entries * sizeof(uint16_t)));
 
   for (size_t i = 0; i < nb_entries; ++i) {
-    this->binary_->symbol_version_table_.push_back(new SymbolVersion{array[i]});
+    uint16_t symver;
+    if (this->need_endian_swap) {
+      symver = BinaryStream::swap_endian(array[i]);
+    } else {
+      symver = array[i];
+    }
+    this->binary_->symbol_version_table_.push_back(new SymbolVersion{symver});
   }
 }
 
@@ -249,6 +256,14 @@ void Parser::parse_symbol_sysv_hash(uint64_t offset) {
   const uint32_t* header = reinterpret_cast<const uint32_t*>(
       this->stream_->read(current_offset, 2 * sizeof(uint32_t)));
 
+  uint32_t swapped_header[2];
+  if (this->need_endian_swap) {
+    for (size_t i = 0; i < sizeof(swapped_header)/sizeof(uint32_t); i++) {
+      swapped_header[i] = BinaryStream::swap_endian(header[i]);
+    }
+    header = swapped_header;
+  }
+
   current_offset += 2 * sizeof(uint32_t);
 
   const uint32_t nbuckets = std::min<uint32_t>(header[0], Parser::NB_MAX_BUCKETS);
@@ -258,7 +273,12 @@ void Parser::parse_symbol_sysv_hash(uint64_t offset) {
     std::vector<uint32_t> buckets(nbuckets);
 
     for (size_t i = 0; i < nbuckets; ++i) {
-      buckets[i] = this->stream_->read_integer<uint32_t>(current_offset);
+      uint32_t val = this->stream_->read_integer<uint32_t>(current_offset);
+      if (this->need_endian_swap) {
+        buckets[i] = BinaryStream::swap_endian(val);
+      } else {
+        buckets[i] = val;
+      }
       current_offset += sizeof(uint32_t);
     }
 
@@ -275,7 +295,12 @@ void Parser::parse_symbol_sysv_hash(uint64_t offset) {
     std::vector<uint32_t> chains(nchain);
 
     for (size_t i = 0; i < nchain; ++i) {
-      chains[i] = this->stream_->read_integer<uint32_t>(current_offset);
+      uint32_t val = this->stream_->read_integer<uint32_t>(current_offset);
+      if (this->need_endian_swap) {
+        chains[i] = BinaryStream::swap_endian(val);
+      } else {
+        chains[i] = val;
+      }
       current_offset += sizeof(uint32_t);
     }
 
@@ -299,15 +324,26 @@ void Parser::parse_notes(uint64_t offset, uint64_t size) {
 
   while(current_offset < last_offset) {
     uint32_t namesz = this->stream_->read_integer<uint32_t>(current_offset);
+    if (this->need_endian_swap) {
+      namesz = BinaryStream::swap_endian(namesz);
+    }
     current_offset += sizeof(uint32_t);
     VLOG(VDEBUG) << "Name size: " << std::hex << namesz;
 
-    uint32_t descsz = std::min(this->stream_->read_integer<uint32_t>(current_offset), Parser::MAX_NOTE_DESCRIPTION);
+    uint32_t descsz = this->stream_->read_integer<uint32_t>(current_offset);
+    if (this->need_endian_swap) {
+      descsz = BinaryStream::swap_endian(descsz);
+    }
+    descsz = std::min(descsz, Parser::MAX_NOTE_DESCRIPTION);
 
     current_offset += sizeof(uint32_t);
     VLOG(VDEBUG) << "Description size: " << std::hex << descsz;
 
-    NOTE_TYPES type = static_cast<NOTE_TYPES>(this->stream_->read_integer<uint32_t>(current_offset));
+    uint32_t i_type = this->stream_->read_integer<uint32_t>(current_offset);
+    if (this->need_endian_swap) {
+      i_type = BinaryStream::swap_endian(i_type);
+    }
+    NOTE_TYPES type = static_cast<NOTE_TYPES>(i_type);
     current_offset += sizeof(uint32_t);
     VLOG(VDEBUG) << "Type: " << std::hex << static_cast<size_t>(type);
 
@@ -320,7 +356,8 @@ void Parser::parse_notes(uint64_t offset, uint64_t size) {
     current_offset += namesz;
     current_offset = align(current_offset, sizeof(uint32_t));
 
-    std::vector<uint8_t> description;
+    /*
+    std::vector<uint8_t> description();
     if (descsz > 0) {
       const uint8_t* desc_ptr = reinterpret_cast<const uint8_t*>(
         this->stream_->read(current_offset, descsz));
@@ -330,6 +367,30 @@ void Parser::parse_notes(uint64_t offset, uint64_t size) {
       current_offset += descsz;
       current_offset = align(current_offset, sizeof(uint32_t));
     }
+    */
+
+    std::vector<uint8_t> description(descsz);
+    if (descsz > 0) {
+      // number of 4 byte chunks in the description
+      const size_t nb_chunks = (descsz - 1) / sizeof(uint32_t) + 1;
+      const uint32_t* desc_ptr = reinterpret_cast<const uint32_t*> (
+          this->stream_->read(current_offset, nb_chunks));
+      for (size_t i = 0; i < nb_chunks; i++) {
+        uint32_t swapped;
+        const uint32_t *p_desc_chunk;
+        if (this->need_endian_swap) {
+          swapped = BinaryStream::swap_endian(desc_ptr[i]);
+          p_desc_chunk = & swapped;
+        } else {
+          p_desc_chunk = &desc_ptr[i];
+        }
+        for (size_t j = 0; j < sizeof(uint32_t); j++) {
+          description[i * 4 + j] = *(reinterpret_cast<const uint8_t *>(p_desc_chunk) + j);
+        }
+        current_offset += nb_chunks * sizeof(uint32_t);
+      }
+    }
+
     std::unique_ptr<Note> note;
 
     if (name == AndroidNote::NAME and type == NOTE_TYPES::NT_GNU_ABI_TAG) {

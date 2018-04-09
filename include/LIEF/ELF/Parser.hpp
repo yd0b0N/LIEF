@@ -227,6 +227,7 @@ class LIEF_API Parser : public LIEF::Parser {
     Binary*                       binary_;
     ELF_CLASS                     type_;
     DYNSYM_COUNT_METHODS          count_mtd_;
+    bool                          need_endian_swap;
 };
 
 
