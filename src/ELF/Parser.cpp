@@ -30,7 +30,6 @@
 #include "LIEF/ELF/utils.hpp"
 #include "LIEF/ELF/AndroidNote.hpp"
 
-
 #include "Parser.tcc"
 
 
@@ -83,9 +82,27 @@ void Parser::init(const std::string& name) {
     this->binary_->name(name);
     this->binary_->datahandler_ = new DataHandler::Handler{this->stream_->content()};
 
-    uint32_t type = reinterpret_cast<const Elf32_Ehdr*>(
-        this->stream_->read(0, sizeof(Elf32_Ehdr)))->e_ident[static_cast<size_t>(IDENTITY::EI_CLASS)];
+    const Elf32_Ehdr *elf_hdr = reinterpret_cast<const Elf32_Ehdr*>(
+        this->stream_->read(0, sizeof(Elf32_Ehdr)));
 
+    switch (elf_hdr->e_ident[static_cast<uint8_t>(IDENTITY::EI_DATA)]) {
+#ifdef __BYTE_ORDER__
+#if  defined(__ORDER_LITTLE_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+      case ENDIANNESS::ENDIAN_BIG:
+        this->need_endian_swap = true;
+        break;
+#elif defined(__ORDER_BIG_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+      case ENDIANNESS::ENDIAN_LITTLE:
+        this->need_endian_swap = true;
+        break;
+#endif
+#endif // __BYTE_ORDER__
+      default:
+        // we're good (or don't know what to do), consider bytes are in the expected order
+        break;
+    }
+
+    uint32_t type = elf_hdr->e_ident[static_cast<size_t>(IDENTITY::EI_CLASS)];
     this->binary_->type_ = static_cast<ELF_CLASS>(type);
     switch (this->binary_->type_) {
       case ELF_CLASS::ELFCLASS32:
@@ -105,6 +122,7 @@ void Parser::init(const std::string& name) {
         //TODO try to guess with e_machine
         throw LIEF::corrupted("e_ident[EI_CLASS] corrupted");
     }
+
   } catch (const std::exception& e) {
     LOG(WARNING) << e.what();
     //delete this->binary_;
@@ -140,8 +158,8 @@ void Parser::parse_symbol_version(uint64_t symbol_version_offset) {
   VLOG(VDEBUG) << "Symbol version offset: 0x" << std::hex << symbol_version_offset << std::endl;
 
   const uint32_t nb_entries = static_cast<uint32_t>(this->binary_->dynamic_symbols_.size());
-  const uint16_t* array = reinterpret_cast<const uint16_t*>(
-      this->stream_->read(symbol_version_offset, nb_entries * sizeof(uint16_t)));
+  std::unique_ptr<uint16_t[]> array = 
+      this->stream_->read<uint16_t>(symbol_version_offset, nb_entries, this->need_endian_swap);
 
   for (size_t i = 0; i < nb_entries; ++i) {
     uint16_t symver;
@@ -174,19 +192,19 @@ uint64_t Parser::get_dynamic_string_table_from_segments(void) const {
     if (this->type_ == ELF_CLASS::ELFCLASS32) {
 
       size_t nb_entries = size / sizeof(Elf32_Dyn);
-      const Elf32_Dyn* entries = reinterpret_cast<const Elf32_Dyn*>(
-          this->stream_->read(offset, size));
+      std::unique_ptr<Elf32_Dyn[]> entries = 
+          this->stream_->read<Elf32_Dyn>(offset, nb_entries, this->need_endian_swap);
+
       for (size_t i = 0; i < nb_entries; ++i) {
         if (static_cast<DYNAMIC_TAGS>(entries[i].d_tag) ==
             DYNAMIC_TAGS::DT_STRTAB) {
           va_offset = this->binary_->virtual_address_to_offset(entries[i].d_un.d_val);
         }
       }
-
     } else {
-      const Elf64_Dyn* entries = reinterpret_cast<const Elf64_Dyn*>(
-          this->stream_->read(offset, size));
       size_t nb_entries = size / sizeof(Elf64_Dyn);
+      std::unique_ptr<Elf64_Dyn[]> entries = 
+          this->stream_->read<Elf64_Dyn>(offset, nb_entries, this->need_endian_swap);
       for (size_t i = 0; i < nb_entries; ++i) {
         if (static_cast<DYNAMIC_TAGS>(entries[i].d_tag) ==
             DYNAMIC_TAGS::DT_STRTAB) {
@@ -253,16 +271,8 @@ void Parser::parse_symbol_sysv_hash(uint64_t offset) {
 
   uint64_t current_offset = offset;
 
-  const uint32_t* header = reinterpret_cast<const uint32_t*>(
-      this->stream_->read(current_offset, 2 * sizeof(uint32_t)));
-
-  uint32_t swapped_header[2];
-  if (this->need_endian_swap) {
-    for (size_t i = 0; i < sizeof(swapped_header)/sizeof(uint32_t); i++) {
-      swapped_header[i] = BinaryStream::swap_endian(header[i]);
-    }
-    header = swapped_header;
-  }
+  std::unique_ptr<uint32_t[]> header =
+      this->stream_->read<uint32_t>(current_offset, 2, this->need_endian_swap);
 
   current_offset += 2 * sizeof(uint32_t);
 
@@ -273,12 +283,7 @@ void Parser::parse_symbol_sysv_hash(uint64_t offset) {
     std::vector<uint32_t> buckets(nbuckets);
 
     for (size_t i = 0; i < nbuckets; ++i) {
-      uint32_t val = this->stream_->read_integer<uint32_t>(current_offset);
-      if (this->need_endian_swap) {
-        buckets[i] = BinaryStream::swap_endian(val);
-      } else {
-        buckets[i] = val;
-      }
+      buckets[i] = this->stream_->read_integer<uint32_t>(current_offset, this->need_endian_swap);
       current_offset += sizeof(uint32_t);
     }
 
@@ -295,12 +300,7 @@ void Parser::parse_symbol_sysv_hash(uint64_t offset) {
     std::vector<uint32_t> chains(nchain);
 
     for (size_t i = 0; i < nchain; ++i) {
-      uint32_t val = this->stream_->read_integer<uint32_t>(current_offset);
-      if (this->need_endian_swap) {
-        chains[i] = BinaryStream::swap_endian(val);
-      } else {
-        chains[i] = val;
-      }
+      chains[i] = this->stream_->read_integer<uint32_t>(current_offset, this->need_endian_swap);
       current_offset += sizeof(uint32_t);
     }
 
@@ -323,26 +323,17 @@ void Parser::parse_notes(uint64_t offset, uint64_t size) {
   uint64_t last_offset = offset + size;
 
   while(current_offset < last_offset) {
-    uint32_t namesz = this->stream_->read_integer<uint32_t>(current_offset);
-    if (this->need_endian_swap) {
-      namesz = BinaryStream::swap_endian(namesz);
-    }
+    uint32_t namesz = this->stream_->read_integer<uint32_t>(current_offset, this->need_endian_swap);
     current_offset += sizeof(uint32_t);
     VLOG(VDEBUG) << "Name size: " << std::hex << namesz;
 
-    uint32_t descsz = this->stream_->read_integer<uint32_t>(current_offset);
-    if (this->need_endian_swap) {
-      descsz = BinaryStream::swap_endian(descsz);
-    }
+    uint32_t descsz = this->stream_->read_integer<uint32_t>(current_offset, this->need_endian_swap);
     descsz = std::min(descsz, Parser::MAX_NOTE_DESCRIPTION);
 
     current_offset += sizeof(uint32_t);
     VLOG(VDEBUG) << "Description size: " << std::hex << descsz;
 
-    uint32_t i_type = this->stream_->read_integer<uint32_t>(current_offset);
-    if (this->need_endian_swap) {
-      i_type = BinaryStream::swap_endian(i_type);
-    }
+    uint32_t i_type = this->stream_->read_integer<uint32_t>(current_offset, this->need_endian_swap);
     NOTE_TYPES type = static_cast<NOTE_TYPES>(i_type);
     current_offset += sizeof(uint32_t);
     VLOG(VDEBUG) << "Type: " << std::hex << static_cast<size_t>(type);
@@ -357,7 +348,7 @@ void Parser::parse_notes(uint64_t offset, uint64_t size) {
     current_offset = align(current_offset, sizeof(uint32_t));
 
     /*
-    std::vector<uint8_t> description();
+    std::vector<uint8_t> description;
     if (descsz > 0) {
       const uint8_t* desc_ptr = reinterpret_cast<const uint8_t*>(
         this->stream_->read(current_offset, descsz));
@@ -369,28 +360,20 @@ void Parser::parse_notes(uint64_t offset, uint64_t size) {
     }
     */
 
-    std::vector<uint8_t> description(descsz);
+    std::vector<uint8_t> description;
     if (descsz > 0) {
       // number of 4 byte chunks in the description
       const size_t nb_chunks = (descsz - 1) / sizeof(uint32_t) + 1;
-      const uint32_t* desc_ptr = reinterpret_cast<const uint32_t*> (
-          this->stream_->read(current_offset, nb_chunks));
-      for (size_t i = 0; i < nb_chunks; i++) {
-        uint32_t swapped;
-        const uint32_t *p_desc_chunk;
-        if (this->need_endian_swap) {
-          swapped = BinaryStream::swap_endian(desc_ptr[i]);
-          p_desc_chunk = & swapped;
-        } else {
-          p_desc_chunk = &desc_ptr[i];
-        }
-        for (size_t j = 0; j < sizeof(uint32_t); j++) {
-          description[i * 4 + j] = *(reinterpret_cast<const uint8_t *>(p_desc_chunk) + j);
-        }
-        current_offset += nb_chunks * sizeof(uint32_t);
-      }
-    }
+      std::unique_ptr<uint32_t[]> desc_ptr =
+          this->stream_->read<uint32_t>(current_offset, nb_chunks, this->need_endian_swap);
+      
+      description = {
+        reinterpret_cast<uint8_t *>(desc_ptr.get()), 
+        reinterpret_cast<uint8_t *>(desc_ptr.get()) + descsz};
 
+      current_offset += nb_chunks * sizeof(uint32_t);
+    }
+  
     std::unique_ptr<Note> note;
 
     if (name == AndroidNote::NAME and type == NOTE_TYPES::NT_GNU_ABI_TAG) {
@@ -410,8 +393,6 @@ void Parser::parse_notes(uint64_t offset, uint64_t size) {
   }
 
 }
-
-
 
 }
 }

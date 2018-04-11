@@ -20,6 +20,7 @@
 #include "LIEF/ELF/DynamicEntryFlags.hpp"
 
 #include "Object.tcc"
+#include "BinaryStream/VectorStream.tcc"
 
 namespace LIEF {
 namespace ELF {
@@ -448,46 +449,11 @@ void Parser::parse_header(void) {
 
   VLOG(VDEBUG) << "[+] Parsing Header";
   try {
-    Elf_Ehdr const *elf_hdr = reinterpret_cast<const Elf_Ehdr*>(
-        this->stream_->read(0, sizeof(Elf_Ehdr)));
+    std::unique_ptr<Elf_Ehdr[]> elf_hdr_array = 
+      this->stream_->read<Elf_Ehdr>(0, 1, this->need_endian_swap);
+    Elf_Ehdr *elf_hdr = elf_hdr_array.get();
 
-    switch (elf_hdr->e_ident[static_cast<uint8_t>(IDENTITY::EI_DATA)]) {
-#ifdef __BYTE_ORDER__
-#if  defined(__ORDER_LITTLE_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
-      case ENDIANNESS::ENDIAN_BIG:
-        this->need_endian_swap = true;
-        break;
-#elif defined(__ORDER_BIG_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-      case ENDIANNESS::ENDIAN_LITTLE:
-        this->need_endian_swap = true;
-        break;
-#endif
-#endif // __BYTE_ORDER__
-      default:
-        // we're good (or don't know what to do), consider bytes are in the expected order
-        break;
-    }
-    if (this->need_endian_swap) {
-      Elf_Ehdr swapped;
-      
-      swapped.e_type      = BinaryStream::swap_endian(elf_hdr->e_type),
-      swapped.e_machine   = BinaryStream::swap_endian(elf_hdr->e_machine),
-      swapped.e_version   = BinaryStream::swap_endian(elf_hdr->e_version),
-      swapped.e_entry     = BinaryStream::swap_endian(elf_hdr->e_entry),
-      swapped.e_phoff     = BinaryStream::swap_endian(elf_hdr->e_phoff),
-      swapped.e_shoff     = BinaryStream::swap_endian(elf_hdr->e_shoff),
-      swapped.e_flags     = BinaryStream::swap_endian(elf_hdr->e_flags),
-      swapped.e_ehsize    = BinaryStream::swap_endian(elf_hdr->e_ehsize),
-      swapped.e_phentsize = BinaryStream::swap_endian(elf_hdr->e_phentsize),
-      swapped.e_phnum     = BinaryStream::swap_endian(elf_hdr->e_phnum),
-      swapped.e_shentsize = BinaryStream::swap_endian(elf_hdr->e_shentsize),
-      swapped.e_shnum     = BinaryStream::swap_endian(elf_hdr->e_shnum),
-      swapped.e_shstrndx  = BinaryStream::swap_endian(elf_hdr->e_shstrndx),
-      memcpy(&swapped.e_ident, &elf_hdr->e_ident, sizeof(swapped.e_ident));
-      this->binary_->header_ = {&swapped};
-    } else {
-      this->binary_->header_ = {elf_hdr};
-    }
+    this->binary_->header_ = {elf_hdr};
   } catch (const read_out_of_bound&) {
     throw corrupted("Header corrupted");
   }
@@ -673,12 +639,12 @@ uint32_t Parser::max_relocation_index(uint64_t relocations_offset, uint64_t size
 
   const uint32_t nb_entries = static_cast<uint32_t>(size / sizeof(REL_T));
 
-  const REL_T* reloc_entry = reinterpret_cast<const REL_T*>(
-        this->stream_->read(relocations_offset, nb_entries * sizeof(REL_T)));
+  std::unique_ptr<REL_T[]> reloc_entries = 
+    this->stream_->read<REL_T>(relocations_offset, nb_entries, this->need_endian_swap);
+
   uint32_t idx = 0;
   for (uint32_t i = 0; i < nb_entries; ++i) {
-    idx = std::max(idx, static_cast<uint32_t>(reloc_entry->r_info >> shift));
-    reloc_entry++;
+    idx = std::max(idx, static_cast<uint32_t>(reloc_entries[i].r_info >> shift));
   }
   return (idx + 1);
 } // max_relocation_index
@@ -727,20 +693,15 @@ uint32_t Parser::nb_dynsym_sysv_hash(void) const {
   using Elf_Off  = typename ELF_T::Elf_Off;
 
   const DynamicEntry& dyn_hash = this->binary_->get(DYNAMIC_TAGS::DT_HASH);
+
   const Elf_Off offset = this->binary_->virtual_address_to_offset(dyn_hash.value());
 
   Elf_Off current_offset = offset;
 
-  const uint32_t* header = reinterpret_cast<const uint32_t*>(
-      this->stream_->read(current_offset, 2 * sizeof(uint32_t)));
+  std::unique_ptr<uint32_t[]> header = 
+    this->stream_->read<uint32_t>(current_offset, 2, this->need_endian_swap);
 
-  current_offset += 2 * sizeof(uint32_t);
-
-  //const uint32_t nbuckets  = header[0];
-  const uint32_t nchains = header[1];
-
-  // From the doc: 'so nchain should equal the number of symbol table entries.'
-  return nchains;
+  return header[1];
 }
 
 template<typename ELF_T>
@@ -754,8 +715,8 @@ uint32_t Parser::nb_dynsym_gnu_hash(void) const {
 
   Elf_Off current_offset = offset;
 
-  const uint32_t* header = reinterpret_cast<const uint32_t*>(
-      this->stream_->read(current_offset, 4 * sizeof(uint32_t)));
+  std::unique_ptr<uint32_t[]> header =
+      this->stream_->read<uint32_t>(current_offset, 4, this->need_endian_swap);
 
   current_offset += 4 * sizeof(uint32_t);
 
@@ -773,7 +734,7 @@ uint32_t Parser::nb_dynsym_gnu_hash(void) const {
     bloom_filters.resize(maskwords);
 
     for (size_t i = 0; i < maskwords; ++i) {
-      bloom_filters[i] = this->stream_->read_integer<uint__>(current_offset);
+      bloom_filters[i] = this->stream_->read_integer<uint__>(current_offset, this->need_endian_swap);
       current_offset += sizeof(uint__);
     }
   }
@@ -787,11 +748,11 @@ uint32_t Parser::nb_dynsym_gnu_hash(void) const {
   std::vector<uint32_t> buckets;
   buckets.reserve(nbuckets);
   try {
-    const uint32_t* hash_buckets = reinterpret_cast<const uint32_t*>(
-        this->stream_->read(current_offset, nbuckets * sizeof(uint32_t)));
+    std::unique_ptr<uint32_t[]> hash_buckets =
+        this->stream_->read<uint32_t>(current_offset, nbuckets, this->need_endian_swap);
     current_offset += nbuckets * sizeof(uint32_t);
 
-    buckets = {hash_buckets, hash_buckets + nbuckets};
+    buckets = {hash_buckets.get(), hash_buckets.get() + nbuckets};
   } catch (const read_out_of_bound&) {
     throw corrupted("GNU Hash, hash_buckets corrupted");
   }
@@ -818,7 +779,7 @@ uint32_t Parser::nb_dynsym_gnu_hash(void) const {
     uint32_t hash_value = 0;
     size_t nsyms = 0;
     do {
-      hash_value = this->stream_->read_integer<uint32_t>(current_offset);
+      hash_value = this->stream_->read_integer<uint32_t>(current_offset, this->need_endian_swap);
       current_offset += sizeof(uint32_t);
 
       nsyms++;
@@ -840,32 +801,14 @@ void Parser::parse_sections(void) {
 
   const Elf_Off headers_offset     = this->binary_->header_.section_headers_offset();
   const uint32_t numberof_sections = std::min<uint32_t>(this->binary_->header_.numberof_sections(), Parser::NB_MAX_SECTION);
-  const Elf_Shdr* section_headers  = reinterpret_cast<const Elf_Shdr*>(
-      this->stream_->read(
-        headers_offset,
-        numberof_sections * sizeof(Elf_Shdr)));
 
+  std::unique_ptr<Elf_Shdr[]> section_headers =
+      this->stream_->read<Elf_Shdr>(
+          headers_offset, numberof_sections, this->need_endian_swap);
+  
   for (size_t i = 0; i < numberof_sections; ++i) {
     VLOG(VDEBUG) << "\t Parsing section " << std::dec << i;
-    const Elf_Shdr* hdr = &(section_headers[i]);
-    Section *psection;
-    if (this->need_endian_swap) {
-      Elf_Shdr swapped;
-      swapped.sh_name      = BinaryStream::swap_endian(hdr->sh_name);
-      swapped.sh_type      = BinaryStream::swap_endian(hdr->sh_type);
-      swapped.sh_flags     = BinaryStream::swap_endian(hdr->sh_flags);
-      swapped.sh_addr      = BinaryStream::swap_endian(hdr->sh_addr);
-      swapped.sh_offset    = BinaryStream::swap_endian(hdr->sh_offset);
-      swapped.sh_size      = BinaryStream::swap_endian(hdr->sh_size);
-      swapped.sh_link      = BinaryStream::swap_endian(hdr->sh_link);
-      swapped.sh_info      = BinaryStream::swap_endian(hdr->sh_info);
-      swapped.sh_addralign = BinaryStream::swap_endian(hdr->sh_addralign);
-      swapped.sh_entsize   = BinaryStream::swap_endian(hdr->sh_entsize);
-      psection = new Section{&swapped};
-    } else {
-      psection = new Section{hdr};
-    }
-    std::unique_ptr<Section> section{psection};
+    std::unique_ptr<Section> section{new Section{&section_headers[i]}};
     section->datahandler_ = this->binary_->datahandler_;
 
     this->binary_->datahandler_->create(section->file_offset(), section->size(), DataHandler::Node::SECTION);
@@ -914,8 +857,8 @@ void Parser::parse_segments(void) {
   const Elf_Off segment_headers_offset = this->binary_->header().program_headers_offset();
   const uint32_t nbof_segments         = std::min<uint32_t>(this->binary_->header().numberof_segments(), Parser::NB_MAX_SEGMENTS);
 
-  const Elf_Phdr* segment_headers = reinterpret_cast<const Elf_Phdr*>(
-      this->stream_->read(segment_headers_offset, nbof_segments * sizeof(Elf_Phdr)));
+  std::unique_ptr<Elf_Phdr[]> segment_headers = 
+      this->stream_->read<Elf_Phdr>(segment_headers_offset, nbof_segments, this->need_endian_swap);
 
   auto check_section_in_segment =
     [] (const Section* section, const Segment* segment) {
@@ -923,26 +866,9 @@ void Parser::parse_segments(void) {
         (section->virtual_address() + section->size()) <=
         (segment->virtual_address() + segment->virtual_size());
     };
-
+ 
   for (size_t i = 0; i < nbof_segments; ++i) {
-    const Elf_Phdr* hdr = &(segment_headers[i]);
-    Segment *psegment;
-    if (this->need_endian_swap) {
-      Elf_Phdr swapped;
-      swapped.p_type   = BinaryStream::swap_endian(hdr->p_type);
-      swapped.p_offset = BinaryStream::swap_endian(hdr->p_offset);
-      swapped.p_vaddr  = BinaryStream::swap_endian(hdr->p_vaddr);
-      swapped.p_paddr  = BinaryStream::swap_endian(hdr->p_paddr);
-      swapped.p_filesz = BinaryStream::swap_endian(hdr->p_filesz);
-      swapped.p_memsz  = BinaryStream::swap_endian(hdr->p_memsz);
-      swapped.p_flags  = BinaryStream::swap_endian(hdr->p_flags);
-      swapped.p_align  = BinaryStream::swap_endian(hdr->p_align);
-      psegment = new Segment{&swapped};
-    } else {
-      psegment = new Segment{hdr};
-    }
-    //std::unique_ptr<Segment> segment{new Segment{&segment_headers[i]}};
-    std::unique_ptr<Segment> segment{psegment};
+    std::unique_ptr<Segment> segment{new Segment{&segment_headers[i]}};
     segment->datahandler_ = this->binary_->datahandler_;
     this->binary_->datahandler_->create(segment->file_offset(), segment->physical_size(), DataHandler::Node::SEGMENT);
     LOG(DEBUG) << *segment;
@@ -1000,30 +926,14 @@ void Parser::parse_dynamic_relocations(uint64_t relocations_offset, uint64_t siz
 
   nb_entries = std::min<uint32_t>(nb_entries, Parser::NB_MAX_RELOCATIONS);
 
-  const REL_T* relocEntry = reinterpret_cast<const REL_T*>(
-        this->stream_->read(relocations_offset, nb_entries * sizeof(REL_T)));
+  std::unique_ptr<REL_T[]> reloc_entries = 
+    this->stream_->read<REL_T>(relocations_offset, nb_entries, this->need_endian_swap);
 
   for (uint32_t i = 0; i < nb_entries; ++i) {
-    Relocation *preloc;
-    uint32_t idx;
-    if (this->need_endian_swap) {
-      REL_T swapped;
-      swapped.r_offset = BinaryStream::swap_endian(relocEntry->r_offset);
-      swapped.r_info   = BinaryStream::swap_endian(relocEntry->r_info);
-      if (std::is_same<REL_T, Elf_Rela>::value) {
-        Elf_Rela *pswapped = reinterpret_cast<Elf_Rela *>(&swapped);
-        pswapped->r_addend = \
-          BinaryStream::swap_endian(reinterpret_cast<const Elf_Rela*>(relocEntry)->r_addend);
-      }
-      preloc = new Relocation{&swapped};
-      idx = static_cast<uint32_t>(swapped.r_info >> shift);
-    } else {
-      preloc = new Relocation{relocEntry};
-      idx = static_cast<uint32_t>(relocEntry->r_info >> shift);
-    }
-    std::unique_ptr<Relocation> reloc{preloc};
+    std::unique_ptr<Relocation> reloc{new Relocation{&reloc_entries[i]}};
     reloc->purpose(RELOCATION_PURPOSES::RELOC_PURPOSE_DYNAMIC);
     reloc->architecture_ = this->binary_->header().machine_type();
+    const uint32_t idx =  static_cast<uint32_t>(reloc_entries[i].r_info >> shift);
     if (idx < this->binary_->dynamic_symbols_.size()) {
       reloc->symbol_ = this->binary_->dynamic_symbols_[idx];
     } else {
@@ -1031,9 +941,7 @@ void Parser::parse_dynamic_relocations(uint64_t relocations_offset, uint64_t siz
                    << std::dec << idx << ")" << std::endl
                    << *reloc;
     }
-
     this->binary_->relocations_.push_back(reloc.release());
-    relocEntry++;
   }
 } // build_dynamic_reclocations
 
@@ -1045,26 +953,14 @@ void Parser::parse_static_symbols(uint64_t offset, uint32_t nbSymbols, const Sec
   using Elf_Sym = typename ELF_T::Elf_Sym;
   VLOG(VDEBUG) << "[+] Parsing static symbols";
 
-  const Elf_Sym* symbol_headers = reinterpret_cast<const Elf_Sym*>(
-      this->stream_->read(offset, nbSymbols * sizeof(Elf_Sym)));
+  std::unique_ptr<Elf_Sym[]> symbol_headers = 
+    this->stream_->read<Elf_Sym>(offset, nbSymbols, this->need_endian_swap);
   
   for (uint32_t i = 0; i < nbSymbols; ++i) {
-    const Elf_Sym *symbol_entry = &symbol_headers[i];
-    Elf_Sym swapped;
-    if (this->need_endian_swap) {
-      swapped.st_name  = BinaryStream::swap_endian(symbol_entry->st_name);
-      swapped.st_value = BinaryStream::swap_endian(symbol_entry->st_value);
-      swapped.st_size  = BinaryStream::swap_endian(symbol_entry->st_size);
-      swapped.st_info  = BinaryStream::swap_endian(symbol_entry->st_info);
-      swapped.st_other = BinaryStream::swap_endian(symbol_entry->st_other);
-      swapped.st_shndx = BinaryStream::swap_endian(symbol_entry->st_shndx);
-      symbol_entry = &swapped;
-    }
-
-    std::unique_ptr<Symbol> symbol{new Symbol{symbol_entry}};
+    std::unique_ptr<Symbol> symbol{new Symbol{&symbol_headers[i]}};
     try {
       std::string symbol_name = this->stream_->get_string(
-          string_section->file_offset() + symbol_entry->st_name);
+          string_section->file_offset() + symbol_headers[i].st_name);
       symbol->name(symbol_name);
     } catch (const LIEF::read_out_of_bound& e) {
       LOG(WARNING) << e.what();
@@ -1095,28 +991,18 @@ void Parser::parse_dynamic_symbols(uint64_t offset) {
     LOG(WARNING) << "Unable to find the .dynstr section";
     return;
   }
+
+  std::unique_ptr<Elf_Sym[]> symbol_headers =
+    this->stream_->read<Elf_Sym>(dynamic_symbols_offset, nb_symbols, this->need_endian_swap);
+  
   for (size_t i = 0; i < nb_symbols; ++i) {
     try {
-      const Elf_Sym* symbol_header = reinterpret_cast<const Elf_Sym*>(
-        this->stream_->read(dynamic_symbols_offset + i * sizeof(Elf_Sym), sizeof(Elf_Sym)));
+      std::unique_ptr<Symbol> symbol{new Symbol{&symbol_headers[i]}};
 
-      Elf_Sym swapped;
-      if (this->need_endian_swap) {
-        swapped.st_name  = BinaryStream::swap_endian(symbol_header->st_name);
-        swapped.st_value = BinaryStream::swap_endian(symbol_header->st_value);
-        swapped.st_size  = BinaryStream::swap_endian(symbol_header->st_size);
-        swapped.st_info  = BinaryStream::swap_endian(symbol_header->st_info);
-        swapped.st_other = BinaryStream::swap_endian(symbol_header->st_other);
-        swapped.st_shndx = BinaryStream::swap_endian(symbol_header->st_shndx);
-        symbol_header = &swapped;
-      }
-
-      std::unique_ptr<Symbol> symbol{new Symbol{symbol_header}};
-
-      if (symbol_header->st_name > 0) {
+      if (symbol_headers[i].st_name > 0) {
         try {
           std::string name{
-            this->stream_->get_string(string_offset + symbol_header->st_name)};
+            this->stream_->get_string(string_offset + symbol_headers[i].st_name)};
           symbol->name(name);
         } catch (const exception& e) {
           VLOG(VDEBUG) << e.what();
@@ -1157,18 +1043,11 @@ void Parser::parse_dynamic_entries(uint64_t offset, uint64_t size) {
   } catch (const std::exception&) {
     LOG(WARNING) << "Unable to fetch dynamic string table";
   }
-  const Elf_Dyn* entries = reinterpret_cast<const Elf_Dyn*>(
-      this->stream_->read(offset, nb_entries * sizeof(Elf_Dyn)));
+  std::unique_ptr<Elf_Dyn[]> entries = 
+      this->stream_->read<Elf_Dyn>(offset, nb_entries, this->need_endian_swap);
 
   for (size_t dynIdx = 0; dynIdx < nb_entries; ++dynIdx) {
-    const Elf_Dyn* entry = &entries[dynIdx];
-    Elf_Dyn swapped;
-
-    if (this->need_endian_swap) {
-      swapped.d_tag      = BinaryStream::swap_endian(entry->d_tag);
-      swapped.d_un.d_val = BinaryStream::swap_endian(entry->d_un.d_val);
-      entry = &swapped;
-    }
+    const Elf_Dyn *entry = &entries[dynIdx];
 
     std::unique_ptr<DynamicEntry> dynamic_entry{nullptr};
     switch (static_cast<DYNAMIC_TAGS>(entry->d_tag)) {
@@ -1301,8 +1180,8 @@ void Parser::parse_dynamic_entries(uint64_t offset, uint64_t size) {
       const uint32_t nb_functions = static_cast<uint32_t>((*it_dt_initarray_size)->value() / sizeof(uint__));
       try {
         const Elf_Off offset = this->binary_->virtual_address_to_offset(dt_initarray_entry->value());
-        const Elf_Addr* rawArray = reinterpret_cast<const Elf_Addr*>(
-            this->stream_->read(offset, nb_functions * sizeof(Elf_Addr)));
+        std::unique_ptr<Elf_Addr[]> rawArray = 
+            this->stream_->read<Elf_Addr>(offset, nb_functions, this->need_endian_swap);
 
         for (size_t i = 0; i < nb_functions; ++i) {
           array.push_back(rawArray[i]);
@@ -1344,8 +1223,8 @@ void Parser::parse_dynamic_entries(uint64_t offset, uint64_t size) {
       const uint32_t nb_functions = static_cast<uint32_t>((*it_dt_finiarray_size)->value() / sizeof(uint__));
       try {
         const Elf_Off offset = this->binary_->virtual_address_to_offset(dt_finiarray_entry->value());
-        const Elf_Addr *rawArray = reinterpret_cast<const Elf_Addr*>(
-            this->stream_->read(offset, nb_functions * sizeof(Elf_Addr)));
+        std::unique_ptr<Elf_Addr[]> rawArray =
+            this->stream_->read<Elf_Addr>(offset, nb_functions, this->need_endian_swap);
 
         for (size_t i = 0; i < nb_functions; ++i) {
           array.push_back(rawArray[i]);
@@ -1387,8 +1266,8 @@ void Parser::parse_dynamic_entries(uint64_t offset, uint64_t size) {
       const uint32_t nb_functions = static_cast<uint32_t>((*it_dt_preinitarray_size)->value() / sizeof(uint__));
       try {
         const Elf_Off offset = this->binary_->virtual_address_to_offset(dt_preinitarray_entry->value());
-        const Elf_Addr *rawArray = reinterpret_cast<const Elf_Addr*>(
-            this->stream_->read(offset, nb_functions * sizeof(Elf_Addr)));
+        std::unique_ptr<Elf_Addr[]> rawArray =
+            this->stream_->read<Elf_Addr>(offset, nb_functions, this->need_endian_swap);
 
         for (size_t i = 0; i < nb_functions; ++i) {
           array.push_back(rawArray[i]);
@@ -1422,37 +1301,20 @@ void Parser::parse_pltgot_relocations(uint64_t offset, uint64_t size) {
 
   uint32_t nb_entries = static_cast<uint32_t>(size / sizeof(REL_T));
   nb_entries = std::min<uint32_t>(nb_entries, Parser::NB_MAX_RELOCATIONS);
-  const REL_T* relocEntry = reinterpret_cast<const REL_T*>(
-      this->stream_->read(offset_relocations, nb_entries * sizeof(REL_T)));
+  std::unique_ptr<REL_T[]> reloc_entries = 
+    this->stream_->read<REL_T>(offset_relocations, nb_entries, this->need_endian_swap);
 
   for (uint32_t i = 0; i < nb_entries; ++i) {
-    Relocation *preloc;
-    uint32_t idx;
-    if (this->need_endian_swap) {
-      REL_T swapped;
-      swapped.r_offset = BinaryStream::swap_endian(relocEntry->r_offset);
-      swapped.r_info   = BinaryStream::swap_endian(relocEntry->r_info);
-      if (std::is_same<REL_T, Elf_Rela>::value) {
-        Elf_Rela *pswapped = reinterpret_cast<Elf_Rela *>(&swapped);
-        pswapped->r_addend = \
-          BinaryStream::swap_endian(reinterpret_cast<const Elf_Rela*>(relocEntry)->r_addend);
-      }
-      preloc = new Relocation{&swapped};
-      idx = static_cast<uint32_t>(swapped.r_info >> shift);
-    } else {
-      preloc = new Relocation{relocEntry};
-      idx = static_cast<uint32_t>(relocEntry->r_info >> shift);
-    }
-    std::unique_ptr<Relocation> reloc{preloc};
+    std::unique_ptr<Relocation> reloc{new Relocation{&reloc_entries[i]}};
     reloc->architecture_ = this->binary_->header_.machine_type();
     reloc->purpose(RELOCATION_PURPOSES::RELOC_PURPOSE_PLTGOT);
 
+    const uint32_t idx  = static_cast<uint32_t>(reloc_entries[i].r_info >> shift);
     if (idx > 0 and idx < this->binary_->dynamic_symbols_.size()) {
       reloc->symbol_ = this->binary_->dynamic_symbols_[idx];
     }
 
     this->binary_->relocations_.push_back(reloc.release());
-    relocEntry++;
   }
 }
 
@@ -1470,34 +1332,18 @@ void Parser::parse_section_relocations(uint64_t offset, uint64_t size) {
   uint32_t nb_entries = static_cast<uint32_t>(size / sizeof(REL_T));
   nb_entries = std::min<uint32_t>(nb_entries, Parser::NB_MAX_RELOCATIONS);
 
-  const REL_T* relocEntry = reinterpret_cast<const REL_T*>(
-      this->stream_->read(offset_relocations, nb_entries * sizeof(REL_T)));
+  std::unique_ptr<REL_T[]> reloc_entries = 
+    this->stream_->read<REL_T>(offset_relocations, nb_entries, this->need_endian_swap);
 
   for (uint32_t i = 0; i < nb_entries; ++i) {
-    Relocation *preloc;
-    uint32_t idx;
-    if (this->need_endian_swap) {
-      REL_T swapped;
-      swapped.r_offset = BinaryStream::swap_endian(relocEntry->r_offset);
-      swapped.r_info   = BinaryStream::swap_endian(relocEntry->r_info);
-      if (std::is_same<REL_T, Elf_Rela>::value) {
-        Elf_Rela *pswapped = reinterpret_cast<Elf_Rela *>(&swapped);
-        pswapped->r_addend = \
-          BinaryStream::swap_endian(reinterpret_cast<const Elf_Rela*>(relocEntry)->r_addend);
-      }
-      preloc = new Relocation{&swapped};
-      idx = static_cast<uint32_t>(swapped.r_info >> shift);
-    } else {
-      preloc = new Relocation{relocEntry};
-      idx = static_cast<uint32_t>(relocEntry->r_info >> shift);
-    }
-    std::unique_ptr<Relocation> reloc{preloc};
+    std::unique_ptr<Relocation> reloc{new Relocation{&reloc_entries[i]}};
     reloc->architecture_ = this->binary_->header_.machine_type();
     if (this->binary_->header().file_type() == ELF::E_TYPE::ET_REL and
         this->binary_->segments().size() == 0) {
       reloc->purpose(RELOCATION_PURPOSES::RELOC_PURPOSE_OBJECT);
     }
 
+    const uint32_t idx  = static_cast<uint32_t>(reloc_entries[i].r_info >> shift);
     if (idx > 0 and idx < this->binary_->dynamic_symbols_.size()) {
       reloc->symbol_ = this->binary_->dynamic_symbols_[idx];
     } else if (idx < this->binary_->static_symbols_.size()) {
@@ -1514,7 +1360,6 @@ void Parser::parse_section_relocations(uint64_t offset, uint64_t size) {
           }) == std::end(this->binary_->relocations_)) {
       this->binary_->relocations_.push_back(reloc.release());
     }
-    relocEntry++;
   }
 }
 
@@ -1539,21 +1384,12 @@ void Parser::parse_symbol_version_requirement(uint64_t offset, uint32_t nb_entri
   uint32_t next_symbol_offset = 0;
 
   for (uint32_t symbolCnt = 0; symbolCnt < nb_entries; ++symbolCnt) {
-
-    const Elf_Verneed* header = reinterpret_cast<const Elf_Verneed*>(
-        this->stream_->read(
+    std::unique_ptr<Elf_Verneed[]> nxt_header =
+        this->stream_->read<Elf_Verneed>(
           svr_offset + next_symbol_offset,
-          sizeof(Elf_Verneed)));
+          1, this->need_endian_swap);
+    const Elf_Verneed *header = nxt_header.get();
 
-    Elf_Verneed swapped;
-    if (this->need_endian_swap) {
-      swapped.vn_version = BinaryStream::swap_endian(header->vn_version);
-      swapped.vn_cnt     = BinaryStream::swap_endian(header->vn_cnt);
-      swapped.vn_file    = BinaryStream::swap_endian(header->vn_file);
-      swapped.vn_aux     = BinaryStream::swap_endian(header->vn_aux);
-      swapped.vn_next    = BinaryStream::swap_endian(header->vn_next);
-      header = &swapped;
-    }
     std::unique_ptr<SymbolVersionRequirement> symbol_version_requirement{new SymbolVersionRequirement(header)};
     if (string_offset != 0) {
       symbol_version_requirement->name(
@@ -1565,27 +1401,12 @@ void Parser::parse_symbol_version_requirement(uint64_t offset, uint32_t nb_entri
     uint32_t next_aux_offset = 0;
     if (nb_symbol_aux > 0 and header->vn_aux > 0) {
 
-      const Elf_Vernaux* aux_header = reinterpret_cast<const Elf_Vernaux*>(
-          this->stream_->read(
-            svr_offset + next_symbol_offset + header->vn_aux,
-            sizeof(Elf_Vernaux)));
-
       for (uint32_t j = 0; j < nb_symbol_aux; ++j) {
-        aux_header = reinterpret_cast<const Elf_Vernaux*>(
-            this->stream_->read(
+        std::unique_ptr<Elf_Vernaux[]> nxt_aux_header =
+            this->stream_->read<Elf_Vernaux>(
               svr_offset + next_symbol_offset + header->vn_aux + next_aux_offset,
-              sizeof(Elf_Vernaux)));
-
-        Elf_Vernaux swapped_vernaux;
-        if (this->need_endian_swap) {
-          swapped_vernaux.vna_hash  = BinaryStream::swap_endian(aux_header->vna_hash);
-          swapped_vernaux.vna_flags = BinaryStream::swap_endian(aux_header->vna_flags);
-          swapped_vernaux.vna_other = BinaryStream::swap_endian(aux_header->vna_other);
-          swapped_vernaux.vna_name  = BinaryStream::swap_endian(aux_header->vna_name);
-          swapped_vernaux.vna_next  = BinaryStream::swap_endian(aux_header->vna_next);
-          aux_header = &swapped_vernaux; 
-        }
-
+              1, this->need_endian_swap);
+        const Elf_Vernaux *aux_header = nxt_aux_header.get();
         std::unique_ptr<SymbolVersionAuxRequirement> svar{new SymbolVersionAuxRequirement{aux_header}};
         if (string_offset != 0) {
           svar->name(this->stream_->get_string(string_offset + aux_header->vna_name));
@@ -1601,7 +1422,6 @@ void Parser::parse_symbol_version_requirement(uint64_t offset, uint32_t nb_entri
 
     if (header->vn_next == 0) break;
     next_symbol_offset += header->vn_next;
-
   }
 
 
@@ -1636,40 +1456,23 @@ void Parser::parse_symbol_version_definition(uint64_t offset, uint32_t nb_entrie
   uint32_t next_symbol_offset = 0;
 
   for (uint32_t i = 0; i < nb_entries; ++i) {
-    const Elf_Verdef* svd_header = reinterpret_cast<const Elf_Verdef*>(
-        this->stream_->read(
-        offset + next_symbol_offset,
-        sizeof(Elf_Verdef)));
-
-    Elf_Verdef swapped_svd_header;
-    if (this->need_endian_swap) {
-      swapped_svd_header.vd_version = BinaryStream::swap_endian(svd_header->vd_version);
-      swapped_svd_header.vd_flags   = BinaryStream::swap_endian(svd_header->vd_flags);
-      swapped_svd_header.vd_ndx     = BinaryStream::swap_endian(svd_header->vd_ndx);
-      swapped_svd_header.vd_cnt     = BinaryStream::swap_endian(svd_header->vd_cnt);
-      swapped_svd_header.vd_hash    = BinaryStream::swap_endian(svd_header->vd_hash);
-      swapped_svd_header.vd_aux     = BinaryStream::swap_endian(svd_header->vd_aux);
-      swapped_svd_header.vd_next    = BinaryStream::swap_endian(svd_header->vd_next);
-      svd_header = &swapped_svd_header;
-    }
+    std::unique_ptr<Elf_Verdef[]> nxt_svd_header =
+        this->stream_->read<Elf_Verdef>(
+            offset + next_symbol_offset, 
+            1, this->need_endian_swap);
+    const Elf_Verdef* svd_header = nxt_svd_header.get();
 
     std::unique_ptr<SymbolVersionDefinition> symbol_version_definition{new SymbolVersionDefinition{svd_header}};
     uint32_t nb_aux_symbols = svd_header->vd_cnt;
     uint32_t next_aux_offset = 0;
     for (uint32_t j = 0; j < nb_aux_symbols; ++j) {
-      const Elf_Verdaux* svda_header = reinterpret_cast<const Elf_Verdaux*>(
-          this->stream_->read(
-          offset + next_symbol_offset + svd_header->vd_aux + next_aux_offset,
-          sizeof(Elf_Verdaux)));
-
-      Elf_Verdaux swapped_svda_header;
-      if (this->need_endian_swap) {
-        swapped_svda_header.vda_name = BinaryStream::swap_endian(svda_header->vda_name);
-        swapped_svda_header.vda_next = BinaryStream::swap_endian(svda_header->vda_next);
-        svda_header = &swapped_svda_header;
-      }
-
-      if (string_offset != 0) {
+      std::unique_ptr<Elf_Verdaux[]> nxt_svda_header = 
+          this->stream_->read<Elf_Verdaux>(
+            offset + next_symbol_offset + svd_header->vd_aux + next_aux_offset,
+            1, this->need_endian_swap);
+      const Elf_Verdaux* svda_header = nxt_svda_header.get();
+      
+        if (string_offset != 0) {
         std::string name  = this->stream_->get_string(string_offset + svda_header->vda_name);
         symbol_version_definition->symbol_version_aux_.push_back(new SymbolVersionAux{name});
       }
@@ -1719,16 +1522,8 @@ void Parser::parse_symbol_gnu_hash(uint64_t offset) {
 
   uint64_t current_offset = offset;
 
-  const uint32_t* header = reinterpret_cast<const uint32_t*>(
-      this->stream_->read(current_offset, 4 * sizeof(uint32_t)));
-
-  uint32_t swapped_header[4];
-  if (this->need_endian_swap) {
-    for (size_t i = 0; i < sizeof(swapped_header) / sizeof(uint32_t); i++) {
-      swapped_header[i] = BinaryStream::swap_endian(header[i]);
-    }
-    header = swapped_header;
-  }
+  std::unique_ptr<uint32_t[]> header = 
+    this->stream_->read<uint32_t>(current_offset, 4, this->need_endian_swap);
 
   current_offset += 4 * sizeof(uint32_t);
 
@@ -1754,12 +1549,8 @@ void Parser::parse_symbol_gnu_hash(uint64_t offset) {
 
     for (size_t i = 0; i < maskwords; ++i) {
       uint__ val;
-      val = this->stream_->read_integer<uint__>(current_offset);
-      if (this->need_endian_swap) {
-        bloom_filters[i] = BinaryStream::swap_endian(val);
-      } else {
-        bloom_filters[i] = val;
-      }
+      val = this->stream_->read_integer<uint__>(current_offset, this->need_endian_swap);
+      bloom_filters[i] = val;
       current_offset += sizeof(uint__);
     }
 
@@ -1775,17 +1566,12 @@ void Parser::parse_symbol_gnu_hash(uint64_t offset) {
   std::vector<uint32_t> buckets;
   buckets.reserve(nbuckets);
   try {
-    const uint32_t* hash_buckets = reinterpret_cast<const uint32_t*>(
-        this->stream_->read(current_offset, nbuckets * sizeof(uint32_t)));
+    std::unique_ptr<uint32_t[]> hash_buckets =
+        this->stream_->read<uint32_t>(current_offset, nbuckets, this->need_endian_swap);
+
     current_offset += nbuckets * sizeof(uint32_t);
 
-    buckets = {hash_buckets, hash_buckets + nbuckets};
-
-    if (this->need_endian_swap) {
-      for (size_t i = 0; i < buckets.size(); i++) {
-        buckets[i] = BinaryStream::swap_endian(buckets[i]);
-      }
-    }
+    buckets = {hash_buckets.get(), hash_buckets.get() + nbuckets};
   } catch (const read_out_of_bound&) {
     throw corrupted("GNU Hash, hash_buckets corrupted");
   }
@@ -1802,18 +1588,11 @@ void Parser::parse_symbol_gnu_hash(uint64_t offset) {
 
   std::vector<uint32_t> hashvalues;
   hashvalues.reserve(nb_hash);
-
   try {
-    const uint32_t* hash_values = reinterpret_cast<const uint32_t*>(
-        this->stream_->read(current_offset, nb_hash * sizeof(uint32_t)));
+    std::unique_ptr<uint32_t[]> hash_values =
+        this->stream_->read<uint32_t>(current_offset, nb_hash, this->need_endian_swap);
 
-    hashvalues = {hash_values, hash_values + nb_hash};
-
-    if (this->need_endian_swap) {
-      for (size_t i = 0; i < hashvalues.size(); i++) {
-        hashvalues[i] = BinaryStream::swap_endian(hashvalues[i]);
-      }
-    }
+    hashvalues = {hash_values.get(), hash_values.get() + nb_hash};
   } catch (const read_out_of_bound&) {
     throw corrupted("GNU Hash, nb_hash corrupted");
   }

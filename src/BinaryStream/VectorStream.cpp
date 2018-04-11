@@ -25,6 +25,7 @@
 
 #include "LIEF/BinaryStream/VectorStream.hpp"
 #include "LIEF/exception.hpp"
+#include "VectorStream.tcc"
 
 VectorStream::VectorStream(const std::string& filename) {
   std::ifstream binary(filename, std::ios::in | std::ios::binary);
