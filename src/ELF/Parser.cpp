@@ -162,13 +162,7 @@ void Parser::parse_symbol_version(uint64_t symbol_version_offset) {
       this->stream_->read<uint16_t>(symbol_version_offset, nb_entries, this->need_endian_swap);
 
   for (size_t i = 0; i < nb_entries; ++i) {
-    uint16_t symver;
-    if (this->need_endian_swap) {
-      symver = BinaryStream::swap_endian(array[i]);
-    } else {
-      symver = array[i];
-    }
-    this->binary_->symbol_version_table_.push_back(new SymbolVersion{symver});
+    this->binary_->symbol_version_table_.push_back(new SymbolVersion{array[i]});
   }
 }
 
