@@ -35,9 +35,25 @@ Builder::~Builder(void) = default;
 
 Builder::Builder(Binary *binary) :
   empties_gnuhash_{false},
-  binary_{binary}
-{
+  binary_{binary}{
   this->ios_.reserve(binary->original_size());
+  switch (binary->header().abstract_endianness()) {
+#ifdef __BYTE_ORDER__
+#if  defined(__ORDER_LITTLE_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+    case ENDIANNESS::ENDIAN_BIG:
+      this->need_endian_swap = true;
+      break;
+#elif defined(__ORDER_BIG_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+    case ENDIANNESS::ENDIAN_LITTLE:
+      this->need_endian_swap = true;
+      break;
+#endif
+#endif // __BYTE_ORDER__
+    default:
+      // we're good (or don't know what to do), consider bytes are in the expected order
+      this->need_endian_swap = false;
+      break;
+  }
 }
 
 void Builder::build(void) {
@@ -90,10 +106,17 @@ void Builder::build_empty_symbol_gnuhash(void) {
   Section* gnu_hash_section = *it_gnuhash;
 
   std::vector<uint8_t> content;
-  const uint32_t nb_buckets = 1;
-  const uint32_t shift2     = 0;
-  const uint32_t maskwords  = 1;
-  const uint32_t symndx     = 1; // 0 is reserved
+  uint32_t nb_buckets = 1;
+  uint32_t shift2     = 0;
+  uint32_t maskwords  = 1;
+  uint32_t symndx     = 1; // 0 is reserved
+
+  if (this->need_endian_swap) {
+    nb_buckets = BinaryStream::swap_endian(nb_buckets);
+    shift2     = BinaryStream::swap_endian(shift2);
+    maskwords  = BinaryStream::swap_endian(maskwords);
+    symndx     = BinaryStream::swap_endian(symndx);
+  }
 
   // nb_buckets
   content.insert(std::end(content),

@@ -21,6 +21,8 @@
 
 #include "LIEF/ELF/EnumToString.hpp"
 
+#include "LIEF/BinaryStream/Convert.hpp"
+
 #include "Object.tcc"
 
 namespace LIEF {
@@ -201,6 +203,10 @@ void Builder::build(const Header& header) {;
   ehdr.e_shnum     = static_cast<Elf_Half>(header.numberof_sections());
   ehdr.e_shstrndx  = static_cast<Elf_Half>(header.section_name_table_idx());
 
+  if (this->need_endian_swap) {
+    Convert::swap_endian<Elf_Ehdr>(&ehdr);
+  }
+
   std::copy(
     std::begin(header.identity()),
     std::end(header.identity()),
@@ -292,6 +298,10 @@ void Builder::build_sections(void) {
     shdr.sh_info      = static_cast<Elf_Word>(section->information());
     shdr.sh_addralign = static_cast<Elf_Word>(section->alignment());
     shdr.sh_entsize   = static_cast<Elf_Word>(section->entry_size());
+  
+    if (this->need_endian_swap) {
+      Convert::swap_endian<Elf_Shdr>(&shdr);
+    }
 
     // Write Section'header
     if (section_headers_offset > 0) {
@@ -330,6 +340,10 @@ void Builder::build_segments(void) {
       phdr.p_filesz = static_cast<Elf_Word>(segment->physical_size());
       phdr.p_memsz  = static_cast<Elf_Word>(segment->virtual_size());
       phdr.p_align  = static_cast<Elf_Word>(segment->alignment());
+
+      if (this->need_endian_swap) {
+        Convert::swap_endian(&phdr);
+      }
 
       pheaders.insert(
           std::end(pheaders),
@@ -435,6 +449,10 @@ void Builder::build_static_symbols(void) {
     sym_hdr.st_shndx = static_cast<Elf_Half>(symbol->shndx());
     sym_hdr.st_value = static_cast<Elf_Addr>(symbol->value());
     sym_hdr.st_size  = static_cast<Elf_Word>(symbol->size());
+
+    if (this->need_endian_swap) {
+      Convert::swap_endian(&sym_hdr);
+    }
 
     content.insert(
         std::end(content),
@@ -607,6 +625,10 @@ void Builder::build_dynamic_section(void) {
     dynhdr.d_tag       = static_cast<Elf_Sxword>(entry->tag());
     dynhdr.d_un.d_val  = static_cast<Elf_Xword>(entry->value());
 
+    if (this->need_endian_swap) {
+      Convert::swap_endian(&dynhdr);
+    }
+
     dynamic_table_raw.insert(
       std::end(dynamic_table_raw),
       reinterpret_cast<uint8_t*>(&dynhdr),
@@ -700,8 +722,8 @@ void Builder::build_symbol_hash(void) {
   std::vector<uint8_t> content = (*it_hash_section)->content();
   VectorStream hashtable_stream{content};
 
-  uint32_t nbucket = hashtable_stream.read_integer<uint32_t>(0);
-  uint32_t nchain  = hashtable_stream.read_integer<uint32_t>(0 + sizeof(uint32_t));
+  uint32_t nbucket = hashtable_stream.read_integer<uint32_t>(0, this->need_endian_swap);
+  uint32_t nchain  = hashtable_stream.read_integer<uint32_t>(0 + sizeof(uint32_t), this->need_endian_swap);
 
 
   std::vector<uint8_t> new_hash_table((nbucket + nchain + 2) * sizeof(uint32_t), 0);
@@ -737,6 +759,12 @@ void Builder::build_symbol_hash(void) {
       chain[value] = idx;
     }
     ++idx;
+  }
+
+  if (this->need_endian_swap) {
+    for (size_t i = 0; i < nbucket + nchain + 2; i++) {
+      Convert::swap_endian(&new_hash_table_ptr[i]);
+    }
   }
 
   Section& h_section = **it_hash_section;
@@ -835,7 +863,11 @@ void Builder::build_symbol_gnuhash(void) {
     reinterpret_cast<const uint8_t*>(&shift2),
     reinterpret_cast<const uint8_t*>(&shift2) + sizeof(uint32_t));
 
-
+  if (this->need_endian_swap) { 
+    for (size_t i = 0; i < 4; i++) {
+      Convert::swap_endian(reinterpret_cast<uint32_t *>(raw_gnuhash.data() + i * sizeof(uint32_t)));
+    }
+  }
 
   // Compute Bloom filters
   // =====================
@@ -851,6 +883,14 @@ void Builder::build_symbol_gnuhash(void) {
   }
   for (size_t idx = 0; idx < bloom_filters.size(); ++idx) {
     VLOG(VDEBUG) << "Bloom filter [" << std::dec << idx << "]: " << std::hex << bloom_filters[idx];
+  }
+
+  if (this->need_endian_swap) { 
+    for (uint__ *ptr_bloom = bloom_filters.data(); 
+         ptr_bloom < bloom_filters.data() + bloom_filters.size(); 
+         ptr_bloom++) {
+      Convert::swap_endian(ptr_bloom);
+    }
   }
 
   raw_gnuhash.insert(std::end(raw_gnuhash),
@@ -889,6 +929,19 @@ void Builder::build_symbol_gnuhash(void) {
 
   if (hash_value_idx > 0) {
     hash_values[hash_value_idx - 1] |= 1;
+  }
+  
+  if (this->need_endian_swap) { 
+    for (uint32_t *ptr_buckets = buckets.data(); 
+         ptr_buckets < buckets.data() + buckets.size(); 
+         ptr_buckets++) {
+      Convert::swap_endian(ptr_buckets);
+    }
+    for (uint32_t *ptr_hash_values = hash_values.data(); 
+         ptr_hash_values < hash_values.data() + hash_values.size(); 
+         ptr_hash_values++) {
+      Convert::swap_endian(ptr_hash_values);
+    }
   }
 
   raw_gnuhash.insert(std::end(raw_gnuhash),
@@ -1035,6 +1088,10 @@ void Builder::build_dynamic_symbols(void) {
     sym_header.st_shndx = static_cast<Elf_Half>(symbol->shndx());
     sym_header.st_value = static_cast<Elf_Addr>(symbol->value());
     sym_header.st_size  = static_cast<Elf_Word>(symbol->size());
+
+    if (this->need_endian_swap) {
+      Convert::swap_endian(&sym_header);
+    }
 
     symbol_table_raw.insert(
         std::end(symbol_table_raw),
@@ -1212,6 +1269,10 @@ void Builder::build_dynamic_relocations(void) {
       relahdr.r_info   = static_cast<Elf_Xword>(info);
       relahdr.r_addend = static_cast<Elf_Sxword>(relocation.addend());
 
+      if (this->need_endian_swap) {
+        Convert::swap_endian(&relahdr);
+      }
+
       content.insert(
           std::end(content),
           reinterpret_cast<uint8_t*>(&relahdr),
@@ -1221,6 +1282,10 @@ void Builder::build_dynamic_relocations(void) {
       Elf_Rel relhdr;
       relhdr.r_offset = static_cast<Elf_Addr>(relocation.address());
       relhdr.r_info   = static_cast<Elf_Xword>(info);
+
+      if (this->need_endian_swap) {
+        Convert::swap_endian(&relhdr);
+      }
 
       content.insert(
           std::end(content),
@@ -1353,6 +1418,10 @@ void Builder::build_pltgot_relocations(void) {
       relahdr.r_info   = static_cast<Elf_Xword>(info);
       relahdr.r_addend = static_cast<Elf_Sxword>(relocation.addend());
 
+      if (this->need_endian_swap) {
+        Convert::swap_endian(&relahdr);
+      }
+
       content.insert(
           std::end(content),
           reinterpret_cast<uint8_t*>(&relahdr),
@@ -1362,6 +1431,10 @@ void Builder::build_pltgot_relocations(void) {
       Elf_Rel relhdr;
       relhdr.r_offset = static_cast<Elf_Addr>(relocation.address());
       relhdr.r_info   = static_cast<Elf_Xword>(info);
+
+      if (this->need_endian_swap) {
+        Convert::swap_endian(&relhdr);
+      }
 
       content.insert(
           std::end(content),
@@ -1457,6 +1530,10 @@ void Builder::build_symbol_requirement(void) {
     header.vn_aux     = static_cast<Elf_Word>(svars.size() > 0 ? sizeof(Elf_Verneed) : 0);
     header.vn_next    = static_cast<Elf_Word>(next_symbol_offset);
 
+    if (this->need_endian_swap) {
+      Convert::swap_endian(&header);
+    }
+
     svr_raw.insert(
         std::end(svr_raw),
         reinterpret_cast<uint8_t*>(&header),
@@ -1488,6 +1565,10 @@ void Builder::build_symbol_requirement(void) {
       aux_header.vna_other = static_cast<Elf_Half>(svar.other());
       aux_header.vna_name  = static_cast<Elf_Word>(svar_name_offset);
       aux_header.vna_next  = static_cast<Elf_Word>(svar_idx < (svars.size() - 1) ? sizeof(Elf_Vernaux) : 0);
+
+      if (this->need_endian_swap) {
+        Convert::swap_endian(&aux_header);
+      }
 
       svr_raw.insert(
           std::end(svr_raw),
@@ -1576,6 +1657,10 @@ void Builder::build_symbol_definition(void) {
     header.vd_aux     = static_cast<Elf_Word>(svas.size() > 0 ? sizeof(Elf_Verdef) : 0);
     header.vd_next    = static_cast<Elf_Word>(next_symbol_offset);
 
+    if (this->need_endian_swap) {
+      Convert::swap_endian(&header);
+    }
+
     svd_raw.insert(std::end(svd_raw),
         reinterpret_cast<uint8_t*>(&header),
         reinterpret_cast<uint8_t*>(&header) + sizeof(Elf_Verdef));
@@ -1605,6 +1690,10 @@ void Builder::build_symbol_definition(void) {
       aux_header.vda_name  = static_cast<Elf_Word>(sva_name_offset);
       aux_header.vda_next  = static_cast<Elf_Word>(sva_idx < (svas.size() - 1) ? sizeof(Elf_Verdaux) : 0);
 
+      if (this->need_endian_swap) {
+        Convert::swap_endian(&aux_header);
+      }
+      
       svd_raw.insert(
           std::end(svd_raw),
           reinterpret_cast<uint8_t*>(&aux_header),
@@ -1753,21 +1842,17 @@ void Builder::relocate_dynamic_array(DynamicEntryArray& entry_array, DynamicEntr
           break;
         }
 
-        /*
         case ARCH::EM_PPC:
         {
           relocation = new Relocation(address_relocation, RELOC_POWERPC32::R_PPC_RELATIVE, array[i], is_rela);
           break;
         }
-        */
 
-        /*
         case ARCH::EM_PPC64:
         {
           relocation = new Relocation(address_relocation, RELOC_POWERPC64::R_PPC64_RELATIVE, array[i], is_rela);
           break;
         }
-        */
 
         default:
         {
@@ -1857,13 +1942,20 @@ void Builder::build_notes(void) {
   for (const Note& note : this->binary_->notes()) {
     // First we have to write the length of the Note's name
     const uint32_t namesz = static_cast<uint32_t>(note.name().size() + 1);
+    uint32_t mutable_namesz = namesz;
+    if (this->need_endian_swap) {
+      Convert::swap_endian(&mutable_namesz);
+    } 
     raw_notes.insert(
         std::end(raw_notes),
-        reinterpret_cast<const uint8_t*>(&namesz),
-        reinterpret_cast<const uint8_t*>(&namesz) + sizeof(uint32_t));
+        reinterpret_cast<const uint8_t*>(&mutable_namesz),
+        reinterpret_cast<const uint8_t*>(&mutable_namesz) + sizeof(uint32_t));
 
     // Then the length of the Note's description
-    const uint32_t descsz = static_cast<uint32_t>(note.description().size());
+    uint32_t descsz = static_cast<uint32_t>(note.description().size());
+    if (this->need_endian_swap) {
+      Convert::swap_endian(&descsz);
+    } 
     //const uint32_t descsz = 20;
     raw_notes.insert(
         std::end(raw_notes),
@@ -1871,7 +1963,10 @@ void Builder::build_notes(void) {
         reinterpret_cast<const uint8_t*>(&descsz) + sizeof(uint32_t));
 
     // Then the note's type
-    const NOTE_TYPES type = note.type();
+    NOTE_TYPES type = note.type();
+    if (this->need_endian_swap) {
+      Convert::swap_endian(reinterpret_cast<uint32_t *>(&type));
+    } 
     raw_notes.insert(
         std::end(raw_notes),
         reinterpret_cast<const uint8_t*>(&type),
@@ -1890,10 +1985,15 @@ void Builder::build_notes(void) {
 
     // description content
     const std::vector<uint8_t>& description = note.description();
-    raw_notes.insert(
-        std::end(raw_notes),
-        std::begin(description),
-        std::end(description));
+    for (size_t i = 0; i < description.size() / 4; i++) {
+      uint32_t desc_data = *(reinterpret_cast<const uint32_t *>(description.data()) + i);
+      if (this->need_endian_swap) {
+        Convert::swap_endian(&desc_data);
+      }
+      raw_notes.insert(std::end(raw_notes),
+          reinterpret_cast<const uint8_t *>(&desc_data),
+          reinterpret_cast<const uint8_t *>(&desc_data) + sizeof(uint32_t));
+    }
 
     // Alignment
     raw_notes.resize(align(raw_notes.size(), sizeof(uint32_t)), 0);
@@ -1943,7 +2043,10 @@ void Builder::build_symbol_version(void) {
   //for (const SymbolVersion* sv : this->binary_->symbol_version_table_) {
   for (const Symbol* symbol : this->binary_->dynamic_symbols_) {
     const SymbolVersion& sv = symbol->symbol_version();
-    const uint16_t value = sv.value();
+    uint16_t value = sv.value();
+    if (this->need_endian_swap) {
+      Convert::swap_endian(&value);
+    }
     sv_raw.insert(
         std::end(sv_raw),
         reinterpret_cast<const uint8_t*>(&value),

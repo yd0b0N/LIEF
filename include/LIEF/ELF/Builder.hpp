@@ -116,6 +116,7 @@ class LIEF_API Builder {
     mutable vector_iostream ios_;
     Binary*           binary_;
 
+    bool              need_endian_swap;
 
 };
 
