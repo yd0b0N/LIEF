@@ -420,15 +420,15 @@ void Parser::parse_binary(void) {
   // Try to parse using sections
   if (this->binary_->relocations_.size() == 0) {
     for (const Section& section : this->binary_->sections()) {
+      uint64_t sh_info = section.information();
       try {
         if (section.type() == ELF_SECTION_TYPES::SHT_REL) {
           this->parse_section_relocations<ELF_T, typename ELF_T::Elf_Rel>(
-            section.file_offset(), section.size());
-
+            section.file_offset(), section.size(), this->binary_->sections_[sh_info]);
         }
         else if (section.type() == ELF_SECTION_TYPES::SHT_RELA) {
           this->parse_section_relocations<ELF_T, typename ELF_T::Elf_Rela>(
-            section.file_offset(), section.size());
+            section.file_offset(), section.size(), this->binary_->sections_[sh_info]);
         }
 
       } catch (const exception& e) {
@@ -1319,7 +1319,7 @@ void Parser::parse_pltgot_relocations(uint64_t offset, uint64_t size) {
 }
 
 template<typename ELF_T, typename REL_T>
-void Parser::parse_section_relocations(uint64_t offset, uint64_t size) {
+void Parser::parse_section_relocations(uint64_t offset, uint64_t size, Section *applies_to) {
   using Elf_Rel = typename ELF_T::Elf_Rel;
   using Elf_Rela = typename ELF_T::Elf_Rela;
 
@@ -1338,6 +1338,7 @@ void Parser::parse_section_relocations(uint64_t offset, uint64_t size) {
   for (uint32_t i = 0; i < nb_entries; ++i) {
     std::unique_ptr<Relocation> reloc{new Relocation{&reloc_entries[i]}};
     reloc->architecture_ = this->binary_->header_.machine_type();
+    reloc->applies_to_ = applies_to;
     if (this->binary_->header().file_type() == ELF::E_TYPE::ET_REL and
         this->binary_->segments().size() == 0) {
       reloc->purpose(RELOCATION_PURPOSES::RELOC_PURPOSE_OBJECT);
