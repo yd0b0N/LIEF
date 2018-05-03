@@ -85,14 +85,15 @@ void Parser::init(const std::string& name) {
     const Elf32_Ehdr *elf_hdr = reinterpret_cast<const Elf32_Ehdr*>(
         this->stream_->read(0, sizeof(Elf32_Ehdr)));
 
-    switch (elf_hdr->e_ident[static_cast<uint8_t>(IDENTITY::EI_DATA)]) {
+    ELF_DATA endian = static_cast<ELF_DATA>(elf_hdr->e_ident[static_cast<uint8_t>(IDENTITY::EI_DATA)]);
+    switch (endian) {
 #ifdef __BYTE_ORDER__
 #if  defined(__ORDER_LITTLE_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
-      case ENDIANNESS::ENDIAN_BIG:
+      case ELF_DATA::ELFDATA2MSB:
         this->need_endian_swap = true;
         break;
 #elif defined(__ORDER_BIG_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-      case ENDIANNESS::ENDIAN_LITTLE:
+      case ELF_DATA::ELFDATA2LSB:
         this->need_endian_swap = true;
         break;
 #endif
