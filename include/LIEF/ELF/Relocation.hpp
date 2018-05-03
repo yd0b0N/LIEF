@@ -89,6 +89,9 @@ class LIEF_API Relocation : public LIEF::Relocation {
     void type(uint32_t type);
     void purpose(RELOCATION_PURPOSES purpose);
 
+    // Gory
+    void set_symbol(Symbol &symbol);
+
     virtual void accept(Visitor& visitor) const override;
 
     bool operator==(const Relocation& rhs) const;

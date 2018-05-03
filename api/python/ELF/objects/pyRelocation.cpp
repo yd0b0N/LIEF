@@ -66,6 +66,13 @@ void init_ELF_Relocation_class(py::module& m) {
         &Relocation::has_section,
         "``True`` if a this relocation has a " RST_CLASS_REF(lief.ELF.Section) " associated")
 
+    //REMOVME
+    .def("set_symbol",
+        //static_cast<void (Relocation::*)(Symbol *)>(&Relocation::set_symbol),
+        &Relocation::set_symbol,
+        "Set the " RST_CLASS_REF(lief.ELF.Symbol) " for this relocation")
+    //ENDREMOVME
+
     .def_property_readonly("section",
         static_cast<Section& (Relocation::*)(void)>(&Relocation::section),
         "" RST_CLASS_REF(lief.ELF.Section) " to which the relocation applies",

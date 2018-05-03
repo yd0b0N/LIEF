@@ -160,6 +160,10 @@ const Section& Relocation::section(void) const {
   }
 }
 
+void Relocation::set_symbol(Symbol &symbol) {
+  this->symbol_ = &symbol;
+}
+
 Section& Relocation::section(void) {
   return const_cast<Section&>(static_cast<const Relocation*>(this)->section());
 }
