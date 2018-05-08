@@ -26,7 +26,6 @@
 #include "LIEF/logging++.hpp"
 #include "mbedtls/md5.h"
 
-#include "LIEF/utf8.h"
 #include "LIEF/exception.hpp"
 
 #include "LIEF/PE/utils.hpp"
@@ -42,7 +41,8 @@ namespace PE {
 bool is_pe(const std::string& file) {
   std::ifstream binary(file, std::ios::in | std::ios::binary);
   if (not binary) {
-    throw LIEF::bad_file("Unable to open the file");
+    LOG(ERROR) << "Unable to open the file!";
+    return false;
   }
 
   uint64_t file_size;
@@ -50,6 +50,12 @@ bool is_pe(const std::string& file) {
   binary.seekg(0, std::ios::end);
   file_size = binary.tellg();
   binary.seekg(0, std::ios::beg);
+
+
+  if (file_size < sizeof(pe_dos_header)) {
+    LOG(ERROR) << "File too small";
+    return false;
+  }
 
   char magic[2];
   pe_dos_header dos_header;
@@ -149,18 +155,6 @@ PE_TYPE get_type(const std::vector<uint8_t>& raw) {
 
 }
 
-
-std::string u16tou8(const std::u16string& string) {
-  std::string name;
-  utf8::utf16to8(std::begin(string), std::end(string), std::back_inserter(name));
-  return name;
-}
-
-std::u16string u8tou16(const std::string& string) {
-  std::u16string name;
-  utf8::utf8to16(std::begin(string), std::end(string), std::back_inserter(name));
-  return name;
-}
 
 std::string get_imphash(const Binary& binary) {
   uint8_t md5_buffer[16];

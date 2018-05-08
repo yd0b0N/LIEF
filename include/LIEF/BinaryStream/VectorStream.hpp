@@ -18,30 +18,23 @@
 
 #include <vector>
 #include <string>
-#include <memory>
 
 #include "LIEF/BinaryStream/BinaryStream.hpp"
 
 class VectorStream : public BinaryStream {
   public:
-    //using BinaryStream::read_integer;
-    VectorStream(const std::string& filename);
-    VectorStream(const std::vector<uint8_t>& data);
+  //using BinaryStream::read_integer;
+  VectorStream(const std::string& filename);
+  VectorStream(const std::vector<uint8_t>& data);
 
-    virtual uint64_t    size(void)                                      const override;
-    virtual const void* read(uint64_t offset, uint64_t size)            const override;
-    virtual const char* read_string(uint64_t offset, uint64_t size = 0) const override;
-    virtual std::string get_string(uint64_t offset, uint64_t size = 0)  const override;
+  virtual uint64_t size(void) const override;
 
-    const std::vector<uint8_t>& content(void) const;
+  const std::vector<uint8_t>& content(void) const;
 
-    // Endian-aware reads
-    template<typename X>
-    std::unique_ptr<X[]> read(uint64_t offset, uint64_t count, bool swap_endian = false) const;
-
-  private:
-    std::vector<uint8_t> binary_;
-    uint64_t size_;
+  protected:
+  virtual const void* read_at(uint64_t offset, uint64_t size, bool throw_error = true) const override;
+  std::vector<uint8_t> binary_;
+  uint64_t size_;
 };
 
 

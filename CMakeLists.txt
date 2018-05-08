@@ -77,8 +77,8 @@ set(LIBLIEF_SOURCE_FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/src/Visitor.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/BinaryStream/BinaryStream.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/BinaryStream/VectorStream.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/BinaryStream/VectorStream.tcc"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/BinaryStream/Convert.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/ELF/ELFConvert.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/visitors/hash.cpp")
 
 
@@ -141,6 +141,11 @@ else()
   add_library(LIB_LIEF_SHARED SHARED EXCLUDE_FROM_ALL ${LIBLIEF_SOURCE_FILES} ${LIEF_INCLUDE_FILES}) # Shared one
 endif()
 
+
+if(WINDOWS)
+  target_link_libraries(LIB_LIEF_SHARED ws2_32)
+endif()
+
 target_compile_definitions(LIB_LIEF_STATIC PRIVATE -DLIEF_STATIC)
 target_compile_definitions(LIB_LIEF_SHARED PRIVATE -DLIEF_EXPORTS)
 if (LIEF_SUPPORT_CXX14)
@@ -185,6 +190,7 @@ endif()
 if (LIEF_LOGGING)
   add_definitions(-DELPP_NO_DEFAULT_LOG_FILE)
   add_definitions(-DVDEBUG=9)
+  add_definitions(-DELPP_FEATURE_CRASH_LOG)
   set(ENABLE_LOGGING_SUPPORT 1)
 else()
   set(ENABLE_LOGGING_SUPPORT 0)
@@ -198,6 +204,48 @@ endif()
 if (LIEF_FROZEN_ENABLED)
   list(APPEND LIEF_PRIVATE_INCLUDE_DIR "${FROZEN_INCLUDE_DIR}")
 endif()
+
+# OAT part
+# ========
+if (LIEF_OAT)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/src/OAT/CMakeLists.txt)
+  set(ENABLE_OAT_SUPPORT 1)
+else()
+  set(ENABLE_OAT_SUPPORT 0)
+endif()
+
+# DEX part
+# ========
+if (LIEF_DEX)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/src/DEX/CMakeLists.txt)
+  set(ENABLE_DEX_SUPPORT 1)
+else()
+  set(ENABLE_DEX_SUPPORT 0)
+endif()
+
+
+# VDEX part
+# =========
+if (LIEF_VDEX)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/src/VDEX/CMakeLists.txt)
+  set(ENABLE_VDEX_SUPPORT 1)
+else()
+  set(ENABLE_VDEX_SUPPORT 0)
+endif()
+
+
+# ART part
+# ========
+if (LIEF_ART)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/src/ART/CMakeLists.txt)
+  set(ENABLE_ART_SUPPORT 1)
+else()
+  set(ENABLE_ART_SUPPORT 0)
+endif()
+
+# Platforms
+# =========
+include(${CMAKE_CURRENT_SOURCE_DIR}/src/platforms/CMakeLists.txt)
 
 # LIEF includes
 # =============

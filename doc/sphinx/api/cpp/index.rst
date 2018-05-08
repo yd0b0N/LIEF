@@ -10,6 +10,17 @@ C++
   elf.rst
   pe.rst
   macho.rst
+  oat.rst
+  dex.rst
+  vdex.rst
+  art.rst
+
+
+.. toctree::
+  :caption: Platforms
+  :maxdepth: 2
+
+  platforms/android.rst
 
 Exceptions
 ----------

@@ -693,7 +693,7 @@ void Builder::build_dynamic_section(void) {
     VLOG(VDEBUG) << std::dec << "New '.dynstr' size: " << dyn_strtab_section.size();
 
     this->binary_->get(DYNAMIC_TAGS::DT_STRTAB).value(new_segment.virtual_address());
-    this->binary_->get(DYNAMIC_TAGS::DT_STRSZ).value(dynamic_strings_raw.size());
+    this->binary_->get(DYNAMIC_TAGS::DT_STRSZ).value(new_segment.physical_size());
 
     return this->build_dynamic<ELF_T>();
   }
@@ -721,9 +721,9 @@ void Builder::build_symbol_hash(void) {
 
   std::vector<uint8_t> content = (*it_hash_section)->content();
   VectorStream hashtable_stream{content};
-
-  uint32_t nbucket = hashtable_stream.read_integer<uint32_t>(0, this->need_endian_swap);
-  uint32_t nchain  = hashtable_stream.read_integer<uint32_t>(0 + sizeof(uint32_t), this->need_endian_swap);
+  hashtable_stream.setpos(0);
+  uint32_t nbucket = hashtable_stream.read_conv<uint32_t>();
+  uint32_t nchain  = hashtable_stream.read_conv<uint32_t>();
 
 
   std::vector<uint8_t> new_hash_table((nbucket + nchain + 2) * sizeof(uint32_t), 0);
@@ -1121,7 +1121,7 @@ void Builder::build_dynamic_symbols(void) {
     string_table_section.original_size_ = new_segment.physical_size();
 
     this->binary_->get(DYNAMIC_TAGS::DT_STRTAB).value(new_segment.virtual_address());
-    this->binary_->get(DYNAMIC_TAGS::DT_STRSZ).value(string_table_raw.size());
+    this->binary_->get(DYNAMIC_TAGS::DT_STRSZ).value(new_segment.physical_size());
     return this->build_dynamic<ELF_T>();
   }
 
@@ -1142,7 +1142,7 @@ void Builder::build_dynamic_symbols(void) {
 
     symbol_table_section.original_size_ = new_dynsym_load.physical_size();
 
-    this->binary_->get(DYNAMIC_TAGS::DT_STRSZ).value(symbol_table_raw.size());
+    //this->binary_->get(DYNAMIC_TAGS::DT_STRSZ).value(symbol_table_raw.size());
     this->binary_->get(DYNAMIC_TAGS::DT_SYMTAB).value(new_dynsym_load.virtual_address());
 
     return this->build_dynamic<ELF_T>();
@@ -1599,7 +1599,7 @@ void Builder::build_symbol_requirement(void) {
     dyn_str_section.original_size_ = new_segment.physical_size();
 
     this->binary_->get(DYNAMIC_TAGS::DT_STRTAB).value(new_segment.virtual_address());
-    this->binary_->get(DYNAMIC_TAGS::DT_STRSZ).value(dyn_str_raw.size());
+    this->binary_->get(DYNAMIC_TAGS::DT_STRSZ).value(new_segment.physical_size());
 
     return this->build<ELF_T>();
   }
@@ -1723,7 +1723,7 @@ void Builder::build_symbol_definition(void) {
     dyn_str_section.original_size_ = new_segment.physical_size();
 
     this->binary_->get(DYNAMIC_TAGS::DT_STRTAB).value(new_segment.virtual_address());
-    this->binary_->get(DYNAMIC_TAGS::DT_STRSZ).value(dyn_str_raw.size());
+    this->binary_->get(DYNAMIC_TAGS::DT_STRSZ).value(new_segment.physical_size());
 
     return this->build<ELF_T>();
   }

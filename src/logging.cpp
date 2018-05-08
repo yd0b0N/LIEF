@@ -40,6 +40,22 @@ const char* logging_config = R"config(
    Enabled = true
 )config";
 
+const char* logging_config_disabled = R"config(
+* GLOBAL:
+   FORMAT               = "%msg"
+   ENABLED              = false
+   TO_STANDARD_OUTPUT   = false
+   TO_FILE              = false
+   PERFORMANCE_TRACKING = false
+
+* DEBUG:
+   FORMAT  = "%func %msg"
+   Enabled = false
+)config";
+
+
+
+
 Logger::~Logger(void) = default;
 
 const char* to_string(LOGGING_LEVEL e) {
@@ -61,7 +77,7 @@ const char* to_string(LOGGING_LEVEL e) {
 Logger::Logger(void)
 {
 #if defined(LIEF_LOGGING_SUPPORT)
-  el::Loggers::getLogger("default");
+  (void)el::Loggers::getLogger("default");
   this->enable();
   this->disable();
 #endif
@@ -69,10 +85,12 @@ Logger::Logger(void)
 
 
 void Logger::disable(void) {
-
 #if defined(LIEF_LOGGING_SUPPORT)
-  el::Configurations c;
   el::Loggers::setLoggingLevel(el::Level::Unknown);
+  el::Configurations conf;
+  conf.setToDefault();
+  conf.parseFromText(logging_config_disabled);
+  el::Loggers::reconfigureAllLoggers(conf);
 #endif
 }
 
@@ -85,6 +103,8 @@ void Logger::enable(void) {
 
   el::Loggers::addFlag(el::LoggingFlag::HierarchicalLogging);
   el::Loggers::addFlag(el::LoggingFlag::ColoredTerminalOutput);
+  el::Loggers::addFlag(el::LoggingFlag::ImmediateFlush);
+  el::Loggers::addFlag(el::LoggingFlag::CreateLoggerAutomatically);
   el::Loggers::setLoggingLevel(el::Level::Fatal);
 #endif
 }
@@ -93,6 +113,7 @@ void Logger::enable(void) {
 void Logger::set_verbose_level(uint32_t level) {
 
 #if defined(LIEF_LOGGING_SUPPORT)
+  Logger::enable();
   el::Loggers::setVerboseLevel(level);
 #endif
 }
@@ -101,6 +122,7 @@ void Logger::set_verbose_level(uint32_t level) {
 void Logger::set_level(LOGGING_LEVEL level) {
 
 #if defined(LIEF_LOGGING_SUPPORT)
+  Logger::enable();
   el::Loggers::setLoggingLevel(static_cast<el::Level>(level));
 
   if (level == LOGGING_LEVEL::LOG_DEBUG) {

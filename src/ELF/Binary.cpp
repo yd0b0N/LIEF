@@ -355,33 +355,11 @@ it_const_symbols Binary::dynamic_symbols(void) const {
 
 
 it_symbols Binary::symbols(void) {
-  symbols_t symbols;
-  symbols.reserve(this->dynamic_symbols().size() + this->static_symbols().size());
-  for (Symbol& s : this->dynamic_symbols()) {
-    symbols.push_back(&s);
-  }
-
-  for (Symbol& s : this->static_symbols()) {
-    symbols.push_back(&s);
-  }
-
-  return it_symbols{symbols};
+  return this->static_dyn_symbols();
 }
 
 it_const_symbols Binary::symbols(void) const {
-  symbols_t symbols;
-
-  symbols.reserve(this->dynamic_symbols().size() + this->static_symbols().size());
-
-  for (const Symbol& s : this->dynamic_symbols()) {
-    symbols.push_back(const_cast<Symbol*>(&s));
-  }
-
-  for (const Symbol& s : this->static_symbols()) {
-    symbols.push_back(const_cast<Symbol*>(&s));
-  }
-
-  return it_const_symbols{symbols};
+  return this->static_dyn_symbols();
 }
 
 
@@ -553,17 +531,31 @@ Symbol& Binary::get_static_symbol(const std::string& name) {
 }
 
 
+symbols_t Binary::static_dyn_symbols(void) const {
+  symbols_t symbols;
+  symbols.reserve(this->dynamic_symbols().size() + this->static_symbols().size());
+  for (Symbol& s : this->dynamic_symbols()) {
+    symbols.push_back(&s);
+  }
+
+  for (Symbol& s : this->static_symbols()) {
+    symbols.push_back(&s);
+  }
+  return symbols;
+}
+
 // Exported
 // --------
 
 it_exported_symbols Binary::exported_symbols(void) {
-  return {this->dynamic_symbols_,
+
+  return {this->static_dyn_symbols(),
     [] (const Symbol* symbol) { return symbol->is_exported(); }
   };
 }
 
 it_const_exported_symbols Binary::exported_symbols(void) const {
-  return {this->dynamic_symbols_,
+  return {this->static_dyn_symbols(),
     [] (const Symbol* symbol) { return symbol->is_exported(); }
   };
 }
@@ -574,13 +566,13 @@ it_const_exported_symbols Binary::exported_symbols(void) const {
 // --------
 
 it_imported_symbols Binary::imported_symbols(void) {
-  return filter_iterator<symbols_t>{std::ref(this->dynamic_symbols_),
+  return {this->static_dyn_symbols(),
     [] (const Symbol* symbol) { return symbol->is_imported(); }
   };
 }
 
 it_const_imported_symbols Binary::imported_symbols(void) const {
-  return const_filter_iterator<symbols_t>{std::cref(this->dynamic_symbols_),
+  return {this->static_dyn_symbols(),
     [] (const Symbol* symbol) { return symbol->is_imported(); }
   };
 }
@@ -772,14 +764,15 @@ Relocation& Binary::add_dynamic_relocation(const Relocation& relocation) {
   relocation_ptr->architecture_ = this->header().machine_type();
   this->relocations_.push_back(relocation_ptr);
 
-  /* Adjust size in RELA_SZ/REL_SZ accordingly */
+  // Update the Dynamic Section (Thanks to @yd0b0N)
   bool is_rela = relocation.is_rela();
   DYNAMIC_TAGS tag_sz  = is_rela ? DYNAMIC_TAGS::DT_RELASZ  : DYNAMIC_TAGS::DT_RELSZ;
   DYNAMIC_TAGS tag_ent = is_rela ? DYNAMIC_TAGS::DT_RELAENT : DYNAMIC_TAGS::DT_RELENT;
-  if (this->has(tag_sz) && this->has(tag_ent)) { 
-	  DynamicEntry &dt_sz  = this->get(tag_sz);
-	  DynamicEntry &dt_ent = this->get(tag_ent);
-	  dt_sz.value(dt_sz.value() + dt_ent.value());
+
+  if (this->has(tag_sz) and this->has(tag_ent)) {
+   DynamicEntry &dt_sz  = this->get(tag_sz);
+   DynamicEntry &dt_ent = this->get(tag_ent);
+   dt_sz.value(dt_sz.value() + dt_ent.value());
   }
 
   return *relocation_ptr;
@@ -1324,7 +1317,7 @@ const Segment& Binary::segment_from_virtual_address(uint64_t address) const {
           return false;
         }
         return ((segment->virtual_address() <= address) and
-            (segment->virtual_address() + segment->virtual_size()) >= address);
+            (segment->virtual_address() + segment->virtual_size()) > address);
       });
 
   if (it_segment == this->segments_.cend()) {
@@ -1525,6 +1518,7 @@ Section& Binary::section_from_virtual_address(uint64_t address) {
 
 std::vector<uint8_t> Binary::get_content_from_virtual_address(uint64_t virtual_address, uint64_t size, LIEF::Binary::VA_TYPES) const {
   const Segment& segment = this->segment_from_virtual_address(virtual_address);
+
   const std::vector<uint8_t>& content = segment.content();
   const uint64_t offset = virtual_address - segment.virtual_address();
   uint64_t checked_size = size;
@@ -2258,7 +2252,6 @@ std::ostream& Binary::print(std::ostream& os) const {
 
 
 Binary::~Binary(void) {
-
   for (Relocation* relocation : this->relocations_) {
     delete relocation;
   }
