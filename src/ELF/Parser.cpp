@@ -85,6 +85,29 @@ Parser::Parser(const std::string& file, DYNSYM_COUNT_METHODS count_mtd, Binary* 
   this->init(filesystem::path(file).filename());
 }
 
+bool Parser::should_swap(void) const {
+  if (not this->stream_->can_read<Elf32_Ehdr>(0)) {
+    return false;
+  }
+
+  const Elf32_Ehdr& elf_hdr = this->stream_->peek<Elf32_Ehdr>(0);
+  ELF_DATA endian = static_cast<ELF_DATA>(elf_hdr.e_ident[static_cast<uint8_t>(IDENTITY::EI_DATA)]);
+
+  switch (endian) {
+#ifdef __BYTE_ORDER__
+#if  defined(__ORDER_LITTLE_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+    case ELF_DATA::ELFDATA2MSB:
+#elif defined(__ORDER_BIG_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+    case ELF_DATA::ELFDATA2LSB:
+#endif
+      return true;
+#endif // __BYTE_ORDER__
+    default:
+      // we're good (or don't know what to do), consider bytes are in the expected order
+      return false;
+  }
+}
+
 void Parser::init(const std::string& name) {
   VLOG(VDEBUG) << "Parsing binary: " << name << std::endl;
 
@@ -93,24 +116,8 @@ void Parser::init(const std::string& name) {
     this->binary_->name(name);
     this->binary_->datahandler_ = new DataHandler::Handler{this->stream_->content()};
 
-    const Elf32_Ehdr &elf_hdr = this->stream_->peek<Elf32_Ehdr>(0);
-    
-    ELF_DATA endian = static_cast<ELF_DATA>(elf_hdr.e_ident[static_cast<uint8_t>(IDENTITY::EI_DATA)]);
-    switch (endian) {
-#ifdef __BYTE_ORDER__
-#if  defined(__ORDER_LITTLE_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
-      case ELF_DATA::ELFDATA2MSB:
-#elif defined(__ORDER_BIG_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-      case ELF_DATA::ELFDATA2LSB:
-#endif
-        this->stream_->set_endian_swap(true);
-        break;
-#endif // __BYTE_ORDER__
-      default:
-        // we're good (or don't know what to do), consider bytes are in the expected order
-        break;
-    }
-
+    const Elf32_Ehdr& elf_hdr = this->stream_->peek<Elf32_Ehdr>(0);
+    this->stream_->set_endian_swap(this->should_swap());
     uint32_t type = elf_hdr.e_ident[static_cast<size_t>(IDENTITY::EI_CLASS)];
 
     this->binary_->type_ = static_cast<ELF_CLASS>(type);
@@ -351,8 +358,7 @@ void Parser::parse_notes(uint64_t offset, uint64_t size) {
     std::vector<uint8_t> description;
     if (descsz > 0) {
       const size_t nb_chunks = (descsz - 1) / sizeof(uint32_t) + 1;
-      std::unique_ptr<uint32_t[]> desc_ptr =
-        this->stream_->read_conv_array<uint32_t>(nb_chunks, /* check */false);
+      std::unique_ptr<uint32_t[]> desc_ptr = this->stream_->read_conv_array<uint32_t>(nb_chunks, /* check */ false);
       if (desc_ptr != nullptr) {
         description = {
           reinterpret_cast<uint8_t *>(desc_ptr.get()),

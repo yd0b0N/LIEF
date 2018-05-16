@@ -1532,8 +1532,7 @@ void Parser::parse_symbol_gnu_hash(uint64_t offset) {
 
   this->stream_->setpos(offset);
 
-  std::unique_ptr<uint32_t[]> header =
-    this->stream_->read_conv_array<uint32_t>(4, /* check */false);
+  std::unique_ptr<uint32_t[]> header = this->stream_->read_conv_array<uint32_t>(4, /* check */false);
 
   if (header == nullptr) {
     LOG(ERROR) << "Can't read GNU Hash header";
@@ -1576,8 +1575,7 @@ void Parser::parse_symbol_gnu_hash(uint64_t offset) {
   std::vector<uint32_t> buckets;
   buckets.reserve(nbuckets);
 
-  std::unique_ptr<uint32_t[]> hash_buckets =
-    this->stream_->read_conv_array<uint32_t>(nbuckets, /* check */false);
+  std::unique_ptr<uint32_t[]> hash_buckets = this->stream_->read_conv_array<uint32_t>(nbuckets, false);
 
   if (hash_buckets != nullptr) {
     buckets = {hash_buckets.get(), hash_buckets.get() + nbuckets};
@@ -1596,8 +1594,7 @@ void Parser::parse_symbol_gnu_hash(uint64_t offset) {
     if (nb_hash < MAX_NB_HASH) {
       std::vector<uint32_t> hashvalues;
       hashvalues.reserve(nb_hash);
-      std::unique_ptr<uint32_t[]> hash_values =
-        this->stream_->read_conv_array<uint32_t>(nb_hash, /* check */false);
+      std::unique_ptr<uint32_t[]> hash_values = this->stream_->read_conv_array<uint32_t>(nb_hash, /* check */ false);
       if (hash_values == nullptr) {
         LOG(ERROR) << "Can't read hash table";
       } else {

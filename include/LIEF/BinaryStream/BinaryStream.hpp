@@ -23,7 +23,7 @@
 #include <utility>
 #include <memory>
 
-#include "Convert.hpp"
+#include "LIEF/BinaryStream/Convert.hpp"
 
 class BinaryStream {
   public:
@@ -204,7 +204,7 @@ std::unique_ptr<T[]> BinaryStream::read_conv_array(size_t size, bool check) cons
   if (t == nullptr) {
 	  return nullptr;
   }
-  
+
   std::unique_ptr<T[]> uptr(new T[size]);
 
   for (size_t i = 0; i < size; i++) {
@@ -212,12 +212,11 @@ std::unique_ptr<T[]> BinaryStream::read_conv_array(size_t size, bool check) cons
     if (this->endian_swap_) {
         LIEF::Convert::swap_endian<T>(& uptr[i]);
     } /* else no conversion, just provide the copied data */
-  } 
+  }
   return uptr;
 }
 
-
-template<typename T>
+template<class T>
 T BinaryStream::peek_conv(size_t offset) const {
   T t = this->peek<T>(offset);
 
@@ -227,11 +226,10 @@ T BinaryStream::peek_conv(size_t offset) const {
   return t;
 }
 
-
 template<typename T>
 std::unique_ptr<T[]> BinaryStream::peek_conv_array(size_t offset, size_t size, bool check) const {
   const T *t = this->peek_array<T>(offset, size, check);
-  
+
   if (t == nullptr) {
 	  return nullptr;
   }

@@ -78,7 +78,6 @@ set(LIBLIEF_SOURCE_FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/src/BinaryStream/BinaryStream.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/BinaryStream/VectorStream.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/BinaryStream/Convert.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/ELF/ELFConvert.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/visitors/hash.cpp")
 
 
