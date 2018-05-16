@@ -49,8 +49,11 @@ set(LIEF_MACHO_SRC
   "${CMAKE_CURRENT_LIST_DIR}/ParserConfig.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/hash.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/CodeSignature.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/SegmentSplitInfo.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/DataInCode.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/DataCodeEntry.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/SubFramework.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/DyldEnvironment.cpp"
 )
 
 set(LIEF_MACHO_INCLUDE_FILES
@@ -88,9 +91,23 @@ set(LIEF_MACHO_INCLUDE_FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/include/LIEF/MachO/ParserConfig.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/LIEF/MachO/hash.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/LIEF/MachO/CodeSignature.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/LIEF/MachO/SegmentSplitInfo.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/LIEF/MachO/DataInCode.hpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/include/LIEF/MachO/DataCodeEntry.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/LIEF/MachO/SubFramework.hpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/LIEF/MachO/DyldEnvironment.hpp"
   )
+
+# JSON Part
+# =========
+set(LIEF_MACHO_JSON_SRC "${CMAKE_CURRENT_LIST_DIR}/json.cpp")
+set(LIEF_MACHO_JSON_HDR "${CMAKE_CURRENT_SOURCE_DIR}/include/LIEF/MachO/json.hpp")
+
+
+if (LIEF_ENABLE_JSON)
+  list(APPEND LIEF_MACHO_SRC           ${LIEF_MACHO_JSON_SRC})
+  list(APPEND LIEF_MACHO_INCLUDE_FILES ${LIEF_MACHO_JSON_HDR})
+endif()
 
 source_group("Header Files\\MachO" FILES ${LIEF_MACHO_INCLUDE_FILES})
 source_group("Source Files\\MachO" FILES ${LIEF_MACHO_SRC})

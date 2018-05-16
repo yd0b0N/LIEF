@@ -159,6 +159,7 @@ Mach-O
 | MachOView  | ObjC       | https://github.com/gdbinit/MachOView                                |
 +------------+------------+---------------------------------------------------------------------+
 
+
 Tools
 -----
 
@@ -215,6 +216,12 @@ Tools
 | termux-elf-cleaner | C++        | https://github.com/termux/termux-elf-cleaner           | ELF             | Utility to remove unused ELF |
 |                    |            |                                                        |                 | sections causing warnings.   |
 +--------------------+------------+--------------------------------------------------------+-----------------+------------------------------+
-
+| vdexExtractor      | C          | https://github.com/anestisb/vdexExtractor              | VDEX            | Extract DEX from VDEX        |
++--------------------+------------+--------------------------------------------------------+-----------------+------------------------------+
+| insert_dylib       | C          | https://github.com/Tyilo/insert_dylib                  | Mach-O          | Insert a dylib load command  |
++--------------------+------------+--------------------------------------------------------+-----------------+------------------------------+
+| optool             | Obj-C      | https://github.com/alexzielenski/optool                | Mach-O          | Modify Mach-O commands:      |
+|                    |            |                                                        |                 | Resign, insert commands, ... |
++--------------------+------------+--------------------------------------------------------+-----------------+------------------------------+
 
 

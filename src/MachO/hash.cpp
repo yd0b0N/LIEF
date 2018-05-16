@@ -109,6 +109,7 @@ void Hash::visit(const MainCommand& maincmd) {
 }
 
 void Hash::visit(const DynamicSymbolCommand& dynamic_symbol) {
+  this->visit(*dynamic_symbol.as<LoadCommand>());
   this->process(dynamic_symbol.idx_local_symbol());
   this->process(dynamic_symbol.nb_local_symbols());
 
@@ -234,6 +235,7 @@ void Hash::visit(const ExportInfo& einfo) {
 }
 
 void Hash::visit(const FunctionStarts& fs) {
+  this->visit(*fs.as<LoadCommand>());
   this->process(fs.data_offset());
   this->process(fs.data_size());
   this->process(fs.functions());
@@ -241,11 +243,13 @@ void Hash::visit(const FunctionStarts& fs) {
 }
 
 void Hash::visit(const CodeSignature& cs) {
+  this->visit(*cs.as<LoadCommand>());
   this->process(cs.data_offset());
   this->process(cs.data_size());
 }
 
 void Hash::visit(const DataInCode& dic) {
+  this->visit(*dic.as<LoadCommand>());
   this->process(dic.data_offset());
   this->process(dic.data_size());
   this->process(std::begin(dic.entries()), std::end(dic.entries()));
@@ -257,6 +261,32 @@ void Hash::visit(const DataCodeEntry& dce) {
   this->process(dce.type());
 }
 
+void Hash::visit(const VersionMin& vmin) {
+  this->visit(*vmin.as<LoadCommand>());
+  this->process(vmin.version());
+  this->process(vmin.sdk());
+}
+
+void Hash::visit(const SourceVersion& sv) {
+  this->visit(*sv.as<LoadCommand>());
+  this->process(sv.version());
+}
+
+void Hash::visit(const SegmentSplitInfo& ssi) {
+  this->visit(*ssi.as<LoadCommand>());
+  this->process(ssi.data_offset());
+  this->process(ssi.data_size());
+}
+
+void Hash::visit(const SubFramework& sf) {
+  this->visit(*sf.as<LoadCommand>());
+  this->process(sf.umbrella());
+}
+
+void Hash::visit(const DyldEnvironment& de) {
+  this->visit(*de.as<LoadCommand>());
+  this->process(de.value());
+}
 
 
 
