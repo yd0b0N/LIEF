@@ -37,24 +37,26 @@ Builder::Builder(Binary *binary) :
   empties_gnuhash_{false},
   binary_{binary}{
   this->ios_.reserve(binary->original_size());
-  switch (binary->header().abstract_endianness()) {
+  this->need_endian_swap = this->should_swap();
+}
+
+
+bool Builder::should_swap(void) const {
+  switch (this->binary_->header().abstract_endianness()) {
 #ifdef __BYTE_ORDER__
 #if  defined(__ORDER_LITTLE_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
     case ENDIANNESS::ENDIAN_BIG:
-      this->need_endian_swap = true;
-      break;
 #elif defined(__ORDER_BIG_ENDIAN__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
     case ENDIANNESS::ENDIAN_LITTLE:
-      this->need_endian_swap = true;
-      break;
 #endif
+      return true;
 #endif // __BYTE_ORDER__
     default:
       // we're good (or don't know what to do), consider bytes are in the expected order
-      this->need_endian_swap = false;
-      break;
+      return false;
   }
 }
+
 
 void Builder::build(void) {
   if(this->binary_->type() == ELF_CLASS::ELFCLASS32) {

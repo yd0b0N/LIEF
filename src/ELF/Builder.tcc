@@ -721,6 +721,9 @@ void Builder::build_symbol_hash(void) {
 
   std::vector<uint8_t> content = (*it_hash_section)->content();
   VectorStream hashtable_stream{content};
+  
+  hashtable_stream.set_endian_swap(this->need_endian_swap);
+
   hashtable_stream.setpos(0);
   uint32_t nbucket = hashtable_stream.read_conv<uint32_t>();
   uint32_t nchain  = hashtable_stream.read_conv<uint32_t>();
